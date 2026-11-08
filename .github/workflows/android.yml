@@ -1,0 +1,81 @@
+# APK de Android de STARBLITZ para PRUEBAS: compila el release arm64 firmado con una clave DESECHABLE (se genera en cada
+# ejecución, con contraseña aleatoria enmascarada) y le pasa la verificación estática (scripts/ci/verificar-apk.sh).
+# Es el mismo job `apk` de validacion.yml, pero independiente: no ejecuta ningún otro trabajo.
+# Sin secretos: NO usa ni necesita la clave de producción (ANDROID_KEYSTORE_*). El APK resultante sirve para validar e instalar
+# en un teléfono de pruebas; NO es apto para publicar (la clave es desechable y no permite actualizaciones). Solo manual.
+name: android
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  apk:
+    name: "COMPILACIÓN · APK Android arm64 (+ verificación estática del contenido)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with: { distribution: temurin, java-version: '21' }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: '22', cache: npm }
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - name: Plataforma y herramientas de compilación de Android
+        run: sdkmanager --install "platforms;android-35" "build-tools;34.0.0" "build-tools;35.0.0" "platform-tools" > /dev/null
+      - name: OCR PP-OCR (PyPI + SHA-256) e integridad de las bibliotecas de llama.cpp arm64
+        run: |
+          bash tools/prepare_ppocr.sh
+          cd apps/mobile/android/app/src/main/jniLibs/arm64-v8a
+          sha256sum -c "$GITHUB_WORKSPACE/apps/mobile/android/app/vendor/llama-libs.sha256"
+          file libllama-server-exe.so | tee -a "$GITHUB_STEP_SUMMARY"
+      - run: npm ci
+      - name: Interfaz web de producción + sincronización con Capacitor
+        working-directory: apps/mobile
+        run: |
+          npm run build
+          npx cap sync android
+      - name: Clave de firma DESECHABLE de CI (la tuya se crea al compilar en tu PC con el .bat)
+        run: |
+          PW=$(openssl rand -hex 16)
+          keytool -genkeypair -keystore "$RUNNER_TEMP/ci.jks" -alias starblitz -keyalg RSA -keysize 3072 -validity 3650 \
+            -storepass "$PW" -keypass "$PW" -dname "CN=STARBLITZ CI (desechable), O=STARBLITZ, C=DO"
+          echo "SB_KEYSTORE=$RUNNER_TEMP/ci.jks" >> "$GITHUB_ENV"
+          echo "::add-mask::$PW"
+          echo "SB_KEYSTORE_PASSWORD=$PW" >> "$GITHUB_ENV"
+      - name: Compilar APK (release, firmado)
+        working-directory: apps/mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleRelease 2>&1 | tee "$GITHUB_WORKSPACE/gradle.log"
+          mkdir -p "$GITHUB_WORKSPACE/salida"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/salida/STARBLITZ-android-arm64-CI.apk"
+      - name: Verificación estática del APK
+        run: bash scripts/ci/verificar-apk.sh salida/STARBLITZ-android-arm64-CI.apk informe-apk
+      - name: Resumen
+        if: always()
+        run: |
+          [ -f informe-apk/apk-verificacion.md ] && cat informe-apk/apk-verificacion.md >> "$GITHUB_STEP_SUMMARY"
+          [ -f salida/STARBLITZ-android-arm64-CI.apk ] && sha256sum salida/STARBLITZ-android-arm64-CI.apk | tee salida/STARBLITZ-android-arm64-CI.apk.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: STARBLITZ-Android-APK
+          path: |
+            salida
+            informe-apk
+            gradle.log
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: warn
