@@ -97,7 +97,7 @@ comprobaciones; «Contenido perdido» = segmentos cuyo insulto/término adulto/v
 
 ## 3. Lectura (preliminar)
 
-- **Mejor relación fidelidad / velocidad / memoria (PC):** PLaMo-3-Translate-0.8B (573 MB, 0,5 s/segmento, 0,8 GB de RAM, 45–46 de 56). PLaMo-2B es el más
+- **Mejor relación fidelidad / velocidad / memoria (PC), solo como referencia (PLaMo NO está autorizado, D3):** PLaMo-3-Translate-0.8B (573 MB, 0,5 s/segmento, 0,8 GB de RAM, 45–46 de 56). PLaMo-2B es el más
   fiel en japonés (34/36) pero ~3× más lento. Hy-MT2-1.8B (Apache-2.0) queda en medio (35–39 de 56). Qwen3.5-4B en texto plano (36–41) iguala a
   Hy-MT2 pero es ~3× más lento y ocupa 3,3 GB.
 - **Glosario:** todos los modelos mejoran con glosario; PLaMo y Hy-MT2 lo respetan en 5/5 de la categoría de terminología (Qwen-2B, 4/5 con glosario en el prompt).

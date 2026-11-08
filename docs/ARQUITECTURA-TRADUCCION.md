@@ -53,22 +53,23 @@ Resume la causa de la lentitud, las opciones de arquitectura evaluadas y lo que 
   para revisión (nunca vacío ni aceptado) si sigue sin haber traducción, y aviso si la salida conserva caracteres del idioma original.
 - **Selección automática por familia de modelo**: los modelos dedicados usan texto plano; **Qwen/Gemma y el resto siguen con el traductor contextual** (comportamiento por defecto
   **sin cambios**). Para servidores sin `chat_template_kwargs` (Ollama, LM Studio) las opciones de PLaMo van como mensaje de sistema `[plamo-translate]` (formato de su ficha).
-- Catálogo curado: **Hy-MT2-1.8B** (Apache-2.0), seleccionable, **no recomendado por defecto**. PLaMo no entra al catálogo curado por su licencia (ver §4) pero se puede
-  instalar desde la búsqueda de Hugging Face de la app y se reconoce por su nombre.
+- Catálogo curado: **Hy-MT2-1.8B** (Apache-2.0), seleccionable, **no recomendado por defecto**. PLaMo **no** se ofrece (decisión D3, §4).
 - Pruebas: 22 nuevas en móvil (TS; suite móvil 226/226) y 13 en el motor Python, con modelo simulado: verifican el protocolo (qué se pide, qué se reintenta, qué se conserva, qué se cachea), **no la
   calidad real**.
 
-## 4. Decisiones que no son mías
+## 4. Decisiones del titular
 
-- **D3 (nueva): ¿PLaMo 3 Translate en el catálogo?** Su «PLaMo Community License» permite uso personal y no comercial sin registro; el uso comercial tiene condiciones
-  (ficha del modelo). El proyecto pidió «licencias compatibles con la distribución»: el catálogo curado exige licencia permisiva (hay una prueba que lo impone), así que **no
-  lo incluí**. Si decides aceptarlo como descarga opcional con aviso, es un cambio de una línea + la prueba.
-- **HY-MT1.5** queda **descartado**: su licencia excluye la UE, el Reino Unido y Corea del Sur (texto de `License.txt`). Hy-MT2 es Apache-2.0.
+- **D3 — RESUELTA (2026-11-08): PLaMo 3 Translate NO se incorpora al catálogo, ni siquiera como descarga opcional.** Se conservan solo las
+  medidas de investigación (BENCHMARK-TRADUCCION) como referencia; **no se recomienda, no se ofrece y no se usa**. El código reconoce su formato
+  por nombre (inofensivo), pero la app no lo propone en ningún sitio.
+- **Hy-MT2-1.8B (Apache-2.0)** se mantiene como **candidato alternativo**: seleccionable, **no predeterminado**. **Qwen sigue siendo el modelo por defecto.**
+- **HY-MT1.5** queda **descartado**: su licencia excluye la UE, el Reino Unido y Corea del Sur (texto de `License.txt`).
+- Criterio vigente para nuevos candidatos: licencia **permisiva compatible con distribución y uso comercial**.
 
 ## 5. Qué NO se ha hecho (y por qué no se afirma)
 
 - **No se sustituye Qwen**: sigue siendo el modelo recomendado por defecto. Hasta medir en el Redmi (tiempo por página, RAM, batería, temperatura) y revisar a mano las salidas, no hay
-  base para cambiar el valor por defecto. Con los datos de PC, la candidata natural para probar primero en el teléfono es **PLaMo-0.8B** (si se acepta D3) o **Hy-MT2-1.8B**.
+  base para cambiar el valor por defecto. Con los datos de PC, el candidato alternativo a probar en el teléfono es **Hy-MT2-1.8B** (Apache-2.0) frente a Qwen-4B.
 - **No hay selector en la interfaz** del modo de traducción: se elige por el modelo. `PlainTranslator` ya sabe tratar modelos genéricos (Qwen, Gemma), pero hoy **no hay ninguna ruta que lo active**
   para ellos: un interruptor «modo rápido» para Qwen queda por decidir (con Qwen-4B el texto plano da 6× menos tokens y calidad automática equivalente, 37–41 frente a 39/56).
 - **No está medido**: tiempo por capítulo en el Redmi, calidad con personas nativas, coreano mejorado, OPUS-MT ko/ja→es, comportamiento con páginas largas (más de ~10 globos).
