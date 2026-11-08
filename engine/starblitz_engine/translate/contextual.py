@@ -50,6 +50,8 @@ class PageTranslation:
 
 
 class ContextualTranslator:
+    uses_image = True
+
     def __init__(self, client: LLMClient, model: str, settings: TranslationSettings):
         self.client = client
         self.model = model

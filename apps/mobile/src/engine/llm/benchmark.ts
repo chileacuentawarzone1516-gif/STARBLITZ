@@ -7,7 +7,7 @@ import type { CompareResult, Page, Project } from '@starblitz/shared';
 import { AppError, CancelledError } from '../core/errors';
 import { defaultStyle, newPage, newProject, newRegion } from '../core/schema';
 import { BuiltinClient } from '../translate/llm';
-import type { ContextualTranslator } from '../translate/contextual';
+import type { PageTranslator } from '../translate/contextual';
 import { SAMPLES } from './samples';
 
 /** Proyecto y página sintéticos con `lines` como textos, para probar un modelo sin tocar proyectos reales. */
@@ -27,7 +27,7 @@ export function makeProbe(lang: string, lines: string[]): { project: Project; pa
 }
 
 export async function compareModels(
-  ids: string[], make: (id: string) => Promise<ContextualTranslator>, progress: (fraction: number, message: string) => void,
+  ids: string[], make: (id: string) => Promise<PageTranslator>, progress: (fraction: number, message: string) => void,
   signal: AbortSignal, langs: readonly string[] = ['ja', 'en'],
 ): Promise<CompareResult> {
   const models: CompareResult['models'] = [];

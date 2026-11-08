@@ -17,7 +17,8 @@ import type { JobContext } from '../core/jobs';
 import { AUTO_LANG, effectiveLang, now } from '../core/schema';
 import { directionFor } from '../vision/langid';
 import type { ProjectStore } from '../store/projects';
-import { ContextualTranslator, isRefusal, mergeMemory } from '../translate/contextual';
+import { ContextualTranslator, isRefusal, mergeMemory, type PageTranslator } from '../translate/contextual';
+import { PlainTranslator, mtFamily } from '../translate/plain';
 import { createClient, type ClientConfig, type LLMClient } from '../translate/llm';
 import type { LlmRuntime } from '../translate/runtime';
 import type { DeviceGuard, DeviceProvider, DeviceSample, ModelLibrary, VisionPort } from './ports';
@@ -190,18 +191,26 @@ export class Processor {
   }
 
   /** Traductor con el modelo elegido en los ajustes (o el que mejor encaja con el dispositivo). */
-  async translator(): Promise<ContextualTranslator> {
+  async translator(): Promise<PageTranslator> {
     return this.translatorFor(await this.llmModel());
   }
 
   /** Traductor con un modelo concreto; `quality` fuerza la calidad (la comparación de modelos usa «balanced»). */
-  async translatorFor(model: string, quality?: 'balanced' | 'max', opts: { cache?: boolean } = {}): Promise<ContextualTranslator> {
+  async translatorFor(model: string, quality?: 'balanced' | 'max', opts: { cache?: boolean } = {}): Promise<PageTranslator> {
     const s = this.d.settings();
     const profile = await this.profile();
     const chosen = quality ?? (s.translation.quality === 'auto' ? profile.quality : s.translation.quality);
     const cfg: ClientConfig = { provider: s.llm.provider, base_url: s.llm.base_url, api_key: s.llm.api_key, temperature: s.llm.temperature, timeout_s: s.llm.timeout_s, use_vision: s.llm.use_vision };
     const client = (this.d.clientFactory ?? createClient)(cfg, this.d.runtime);
     const salt = JSON.stringify([s.llm.provider, s.llm.temperature, s.llm.use_vision, chosen]);
+    // Los modelos de traducción dedicados (PLaMo 3 Translate, Hy-MT2…) usan el formato en texto plano: no entienden el esquema JSON
+    // de metadatos y es ~10× menos texto que generar (ver docs/ARQUITECTURA-TRADUCCION.md). El resto sigue con el traductor contextual.
+    const info = (await this.d.library.installed()).find((m) => m.id === model);
+    const family = mtFamily([model, info?.repo ?? '', ...(info?.files ?? [])].join(' '));
+    if (family !== 'generic') {
+      return new PlainTranslator(client, model, family, { review_threshold: s.translation.review_threshold, dictionary: s.translation.dictionary, target_variant: s.translation.target_variant },
+        { cache: opts.cache ? this.d.caches?.translation : undefined, salt: JSON.stringify([salt, family]) });
+    }
     return new ContextualTranslator(client, model, { ...s.translation, quality: chosen }, { cache: opts.cache ? this.d.caches?.translation : undefined, salt });
   }
 
@@ -257,7 +266,7 @@ export class Processor {
     this.runVision = null;
     this.timing.chapter.device_start = await this.sampleDevice();
     const started = performance.now();
-    let translator: ContextualTranslator | null = null;
+    let translator: PageTranslator | null = null;
     try {
       ctx.update({ stage: 'prepare', message: 'Preparando', force: true });
       const needsAnalysis = [...todo.values()].some((t) => t.includes('analyze'));
@@ -284,7 +293,7 @@ export class Processor {
         translator = await this.translatorFor(await this.llmModel(), undefined, { cache: !force });
         stats.model = translator.model;
         if (!(await translator.client.health()).ok) throw new LLMUnavailableError(unavailableMessage(this.d.settings().llm.provider));
-        this.runVision = await this.useVision(); // se decide una vez por tarea, no página a página
+        this.runVision = translator.usesImage === false ? false : await this.useVision(); // se decide una vez por tarea, no página a página
         if (plan.overlap) void startWarm();
       }
       const story = new Map<string, string>(); // memoria narrativa: resúmenes de lo ya traducido, también de páginas fuera de esta tarea
@@ -405,7 +414,7 @@ export class Processor {
     progress.stepDone('analyze', pid);
   }
 
-  private async stepTranslate(ctx: JobContext, progress: Progress, run: RunState, translator: ContextualTranslator | null, projectId: string,
+  private async stepTranslate(ctx: JobContext, progress: Progress, run: RunState, translator: PageTranslator | null, projectId: string,
                               pid: string, story: Map<string, string>, stats: Stats, label: string): Promise<void> {
     const { store } = this.d;
     await progress.checkpoint();

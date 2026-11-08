@@ -1,8 +1,7 @@
 # Investigación de modelos de OCR y traducción
 
-Metadatos (tamaños, licencias declaradas, idiomas) consultados en la API pública de Hugging Face el **2026-11-08**, sin
-descargar ningún peso. **No se ha medido ninguna velocidad ni consumo de RAM** y **no se declara ningún ganador**: la tabla
-de decisión queda vacía hasta ejecutar el [protocolo de comparación](#protocolo-de-comparación). Las licencias son las
+Metadatos (tamaños, licencias declaradas, idiomas) consultados en la API pública de Hugging Face el **2026-11-08**. La parte de **OCR** sigue **sin medir**. La de **traducción** tiene medidas en un PC (no en el teléfono): ver más abajo y
+[BENCHMARK-TRADUCCION](BENCHMARK-TRADUCCION.md). **Aún no se declara ningún ganador definitivo**: falta la medición en el Redmi. Las licencias son las
 **declaradas por quien publica el repositorio**; no son asesoramiento legal.
 
 Leyenda: ✅ comprobado en el repositorio del modelo · 📖 documentado por el autor (no verificado por nosotros) ·
@@ -27,36 +26,65 @@ no una conclusión.
 
 ## Traducción
 
-| Modelo | Descarga (cuantizado) | Licencia (código / pesos) | Idiomas | Runtime y compatibilidad |
-|---|---|---|---|---|
-| **Qwen3.5-0.8B** Q4_K_M · `unsloth/Qwen3.5-0.8B-GGUF` | ✅ **508 MB** (Q4_0: 484 MB; visión opcional `mmproj` 195 MB) | ✅ Apache-2.0 | multilingüe (generalista) | ✅ `llama.cpp`, el runtime actual |
-| Qwen3.5-2B Q4_K_M | ✅ **1 222 MB** (mmproj 637 MB) | ✅ Apache-2.0 | multilingüe | ✅ `llama.cpp` |
-| Qwen3.5-4B Q4_K_M | ✅ **2 614 MB** (mmproj 641 MB) | ✅ Apache-2.0 | multilingüe | ✅ `llama.cpp` (familia del modelo recomendado hoy) |
-| **OPUS-MT ja→es** · `Helsinki-NLP/opus-mt-ja-es` | ✅ ≈ **292 MB** (pesos PyTorch/TF; sin versión ONNX/CT2 oficial) | ✅ Apache-2.0 | ja → es | ❓ Marian: **no está en el runtime actual** (haría falta exportar a ONNX o CTranslate2 y escribir la búsqueda en haz) |
-| **OPUS-MT ko→es** · `Helsinki-NLP/opus-mt-ko-es` | ✅ ≈ **298 MB** | ✅ Apache-2.0 | ko → es | ❓ igual que ja-es |
-| OPUS-MT zh→es | ❌ **no existe** en Hugging Face (solo `zh-en`, `en-zh`…); habría que pivotar por inglés (calidad menor) | — | — | — |
-| **MADLAD-400-3B-MT** · `google/madlad400-3b-mt` | ✅ GGUF Q4_K oficial **1 578 MB** (comunitario `cstr/…`: Q4_K 1 942 MB, Q8_0 3 219 MB); pesos completos 11 217 MB | ✅ Apache-2.0 | ✅ 400+ idiomas | ❓ Arquitectura T5 codificador-decodificador: **no está verificado que el `llama-server` incluido la sirva por la API de chat** |
-| NLLB-200 distilled 600M | ✅ 2 346 MB (PyTorch FP32) | ❌ **CC-BY-NC-4.0** (no comercial) | 200 idiomas | descartado por licencia restrictiva |
-| M2M-100 418M | ✅ 1 846 MB | ✅ MIT | 100 idiomas | ❓ no comparado aquí; 1,8 GB en FP32 |
-| TranslateGemma 4B / Gemma 3 1B | comunitarios en GGUF | ⚠️ **licencia Gemma** (acceso restringido en el repositorio oficial; condiciones y política de uso propias) | multilingüe | ✅ `llama.cpp`; modelos con alineamiento de seguridad |
+Revisado el **2026-11-08** en la API pública y las fichas oficiales de Hugging Face (tamaños de archivo y hash SHA-256 de los
+GGUF descargados verificados contra el publicado por cada repositorio). Las licencias son las **declaradas por quien publica**; no son
+asesoramiento legal. «Medido» = ejecutado en un PC (i7-13620H, CPU, 6 hilos) con
+[`tools/bench`](../tools/bench/README.md); **ninguna medida es del Redmi Note 8 Pro**.
 
-Calidad documentada de las alternativas de MT dedicadas (📖 en sus fichas): OPUS-MT ja→es BLEU 34,6 / chr-F 0,553 en
-Tatoeba ja-es; ko→es BLEU 31,3 / chr-F 0,521 en Tatoeba ko-es. Son **frases cortas de un corpus general**: no representan el
-registro, el argot ni el contexto de un manga, y estos modelos **no usan glosario, personajes ni páginas vecinas**.
+| Modelo | Descarga (Q4_K_M) | Licencia (declarada) | ¿Cabe en el reparto de STARBLITZ? | ja / ko → es | Estado |
+|---|---|---|---|---|---|
+| **PLaMo 3 Translate 0.8B** · `pfnet/plamo-3-translate-0.8b-GGUF` | ✅ **573 MB** (Q4_0 548, Q3_K_M 486, Q2_K 410) | ⚠️ **PLaMo Community License**: uso personal y no comercial gratis sin registro; uso comercial con condiciones (ingresos ≤ 1 000 M¥: gratis con registro previo; más: acuerdo aparte) — 📖 según la ficha, leer el texto completo | ⚠️ **Sí como descarga opcional a petición del usuario** (no se redistribuye el peso; la persona acepta la licencia en su ficha), **no como modelo incluido ni por defecto** hasta que el titular lo decida | ja ✅ (53 idiomas en la ficha; coreano **sin** énfasis declarado) | 🧪 **medido en PC** (ver abajo) y **implementado** (formato nativo PFML3 vía plantilla) |
+| **PLaMo 3 Translate 2B** | ✅ **1 807 MB** | ⚠️ igual | ⚠️ igual | ja ✅ | 🧪 medido en PC |
+| **Hy-MT2-1.8B** (Tencent, 2026-05) · `tencent/Hy-MT2-1.8B-GGUF` | ✅ **1 133 MB** (Q6_K 1 475, Q8_0 1 909); variantes AngelSlim 2-bit 601 MB y 1,25-bit 462 MB | ✅ **Apache-2.0** declarada en el repositorio | ✅ **Sí** (permisiva) | 33 idiomas, incluye ja, ko, es (ficha) | 🧪 **medido en PC** e **implementado** (instrucción nativa + terminología) |
+| Hy-MT2-7B / 30B-A3B | 4 625 MB / 18 237 MB | ✅ Apache-2.0 | ✅ pero **no caben** en un teléfono de 6–8 GB (7B) ni en uno cualquiera (30B) | ✅ | ⛔ descartados para móvil; el 7B queda como opción de PC (sin medir) |
+| 2-bit / 1,25-bit de Hy-MT2 | 601 / 462 MB | ✅ Apache-2.0 | ❓ **requieren un núcleo «STQ» del PR nº 19357 de llama.cpp** (según su ficha): **no está en la versión b12017 que empaquetamos** | ✅ | ⛔ no utilizables hoy |
+| **HY-MT1.5-1.8B** (Tencent, 2025-12) | ✅ 1 133 MB | ❌ **Tencent HY Community License: «no se aplica en la Unión Europea, el Reino Unido ni Corea del Sur»** (texto del archivo `License.txt`) | ❌ **Descartado**: excluiría a España (UE) y a hispanohablantes en el Reino Unido, y a coreano-hablantes en Corea del Sur | ✅ | ⛔ **no usar** (lo sustituye Hy-MT2, Apache-2.0) |
+| **OPUS-MT ja→es** · `Helsinki-NLP/opus-mt-ja-es` | ≈ 306 MB (PyTorch/TF, sin ONNX ni CT2 oficial) | ✅ Apache-2.0 | ✅ | ja→es; Tatoeba BLEU 34,6 (📖, frases cortas) | ❓ **sin medir**: necesita otro runtime (Marian/CTranslate2/ONNX) que no está en la app; **sin glosario ni contexto** |
+| **OPUS-MT ko→es** · `Helsinki-NLP/opus-mt-ko-es` | ≈ 298 MB; conversiones comunitarias: CT2 80 MB (`manancode/…-android`, Apache-2.0), ONNX int8 ≈ 236 MB (licencia no declarada) | ✅ Apache-2.0 (original) | ✅ | ko→es; Tatoeba BLEU 31,3 (📖) | ❓ **sin medir** (igual que el anterior) |
+| OPUS-MT zh→es | ❌ no existe | — | — | — | pivotar por inglés (calidad menor) |
+| **SMaLL-100** · `alirezamsh/small100` | ONNX 1 860 MB / PyTorch 1 331 MB (FP32; **no es ligero**) | ✅ MIT | ✅ | 100 idiomas, calidad inferior a NLLB (📖) | ❓ sin medir; la versión INT8 no está publicada por el autor |
+| **Seed-X-PPO-7B** (ByteDance) | 15 029 MB (safetensors) | ⚠️ «OpenMDW» (otra licencia) | ❓ | 28 idiomas | ⛔ 7B: no cabe en móvil; sin medir |
+| **TranslateGemma 4B** (Google) | ≈ 8 600 MB (safetensors; GGUF comunitarios) | ⚠️ **Gemma** (acceso restringido a aceptar en el repositorio) | ⚠️ con condiciones | multilingüe | ❓ sin medir; modelos con alineamiento de seguridad |
+| **MADLAD-400-3B-MT** (Google) | GGUF Q4_K 1 578 MB | ✅ Apache-2.0 | ✅ | 400+ idiomas | ❓ T5 codificador-decodificador: **no verificado** que nuestro `llama-server` lo sirva por la API de chat |
+| NLLB-200 | 2 346 MB (600M, FP32) | ❌ **CC-BY-NC-4.0** (no comercial) | ❌ descartado por licencia | 200 | ⛔ |
+| **Qwen 3.5** 0.8B / 2B / 4B (la base actual) | 508 / 1 281 / 2 741 MB | ✅ Apache-2.0 | ✅ | generalista | 🧪 **medido en PC** (línea base) |
+| Sugoi 14B/32B | GGUF grandes | ❓ | ❓ | **solo ja→en** | ⛔ no aplica (no es → español) |
 
-### RAM estimada (no medida)
+### Resultados medidos (PC, sin dispositivo) — ver [BENCHMARK-TRADUCCION](BENCHMARK-TRADUCCION.md)
 
-Orden de magnitud para llama.cpp: **tamaño del archivo + caché KV** (crece con el contexto) **+ ~0,3–0,5 GB** de
-proceso. Con ese criterio, Qwen3.5-0.8B Q4 cabría con holgura incluso en 4 GB; el 4B Q4 (2,6 GB) pide un teléfono de
-≥ 6–8 GB. **Son estimaciones**, no mediciones: la RAM real se medirá en el teléfono.
+56 segmentos inventados (36 ja, 20 ko) en 10 categorías (normal, coloquial, insultos, doble sentido, humor, frases incompletas,
+onomatopeyas, adulto, violencia, terminología). «OK» = pasa **todas** las comprobaciones automáticas (sin vacío, sin negativa, sin
+inglés ni texto sin traducir, sin omisión/adición por longitud y **conserva el contenido** esperado: insultos, términos adultos,
+violencia y nombres/glosario).
+
+| Configuración (CPU, 6 hilos) | MB | OK /56 | ja | ko | s/segmento | RAM pico |
+|---|---:|---:|---:|---:|---:|---:|
+| Qwen3.5-0.8B · texto plano | 533 | 18 | — | — | 0,61 | 946 MB |
+| Qwen3.5-2B · texto plano + glosario | 1 281 | 30 | 19/36 | 11/20 | 2,17 | 1 786 MB |
+| **Hy-MT2-1.8B · lote + glosario** | 1 133 | **39** | 27/36 | 12/20 | 0,99 | 1 794 MB |
+| **PLaMo-3-Translate-0.8B · segmento + glosario** | **573** | **45** | 30/36 | 15/20 | **0,51** | **776 MB** |
+| **PLaMo-3-Translate-2B · segmento + glosario** | 1 807 | **48** | **34/36** | 14/20 | 1,67 | 2 205 MB |
+
+**Lectura (preliminar, hecha por mí, no por una persona nativa):** en japonés, PLaMo traduce con fidelidad notable y **no suaviza**
+insultos, escenas adultas ni violencia (todos los textos del corpus se conservaron); Hy-MT2 también conserva el contenido pero comete más
+errores léxicos; Qwen 2B inventa palabras («Trome», «¡MADURO!») aunque no censura. **El coreano es el punto débil de todos** (errores de
+sentido en sufijos de insulto, «arma de fuego» por «cuchillo», «Lo mataré de cuello»…); PLaMo-2B es el más legible. **Nada de esto
+sustituye una evaluación humana ni la medición en el teléfono**; y las comprobaciones automáticas son heurísticas (palabras esperadas),
+no una nota de calidad literaria.
 
 ### Insultos, contenido adulto y expresiones explícitas
 
-- Los modelos **instruidos** (Qwen, Gemma) pueden **negarse o suavizar** el texto por su alineamiento de seguridad. STARBLITZ
-  ya detecta las negativas (`isRefusal`) y, con las correcciones de este trabajo, **conserva el original** en lugar de borrarlo.
-- Los modelos de **traducción dedicada** (OPUS-MT, MADLAD, NLLB) no son conversacionales y no tienen capa de moderación
-  declarada, pero ❓ **no hay documentación** de si omiten o atenúan léxico explícito por sus datos de entrenamiento: se medirá.
-- Ningún comportamiento se da por sentado: el protocolo incluye una categoría de frases con insultos y contenido explícito.
+- **Medido** (corpus propio, PC): ninguno de los cuatro modelos medidos **se negó** a traducir (0 rechazos en 56 × 14 configuraciones) y
+  ninguno omitió líneas adultas o violentas. Hy-MT2 mostró un **suavizado leve** en un insulto (クソ野郎 → «idiota»); Qwen-0.8B tradujo
+  mal más que censuró. Es una muestra pequeña: **no demuestra** ausencia de censura en general.
+- Los modelos **instruidos** de uso general (Qwen, Gemma) pueden negarse o suavizar según el texto; STARBLITZ detecta las negativas
+  (`isRefusal`) y **conserva el original** en lugar de borrarlo.
+- «Sin filtros conversacionales» ≠ «fidelidad probada»: lo segundo solo se afirma donde hay medida (tabla anterior).
+
+### RAM estimada y medida
+
+Medida en PC (RSS del proceso `llama-server`, pico): 0,8B ≈ 0,8–1,0 GB; 1,8–2B ≈ 1,8–2,2 GB; 4B ≈ 3,3 GB. En el Redmi (6–8 GB, ~3,5–5 GB
+útiles para la app tras el sistema) caben PLaMo-0.8B y Hy-MT2-1.8B con holgura; el 4B queda justo. **Sin medir en el teléfono.**
 
 ## Protocolo de comparación
 

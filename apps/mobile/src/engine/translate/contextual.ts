@@ -60,7 +60,17 @@ export function isCacheableResult(kind: 'translate' | 'review', result: Record<s
   });
 }
 
-export class ContextualTranslator {
+/** Lo que el procesador necesita de un traductor de páginas (el contextual con JSON o el de texto plano). */
+export interface PageTranslator {
+  readonly client: LLMClient;
+  readonly model: string;
+  readonly stats: { llm_calls: number; cache_hits: number };
+  /** ¿Usa la imagen de la página? (los traductores de texto plano no: no hace falta prepararla). Por defecto sí. */
+  readonly usesImage?: boolean;
+  translatePage(project: Project, page: Page, o: TranslateOptions): Promise<PageTranslation>;
+}
+
+export class ContextualTranslator implements PageTranslator {
   /** Llamadas reales al modelo y respuestas servidas desde la caché (para medir y para comprobar que no hay llamadas redundantes). */
   readonly stats = { llm_calls: 0, cache_hits: 0 };
 

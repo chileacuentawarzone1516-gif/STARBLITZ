@@ -30,6 +30,7 @@ from ..projects.schema import AUTO_LANG, Bubble, Page, Project, Region, TextStyl
 from ..projects.store import ProjectStore
 from ..render.inpaint import EraseTarget, Inpainter
 from ..translate.contextual import _REFUSAL, ContextualTranslator, estimate_max_chars, merge_memory
+from ..translate.plain import make_translator
 from ..translate.llm import create_client
 from ..vision.bubbles import find_bubble, text_ring_stats
 from ..vision.detector import DetectedBlock, TextDetector
@@ -250,7 +251,7 @@ class Processor:
         next_page = self.store.get_page(project_id, all_ids[idx + 1]) if idx + 1 < len(all_ids) else None
         if page.regions:
             image = None
-            if self.use_vision():
+            if getattr(translator, "uses_image", True) and self.use_vision():
                 image = annotate_for_llm(read_bgr(self.store.original_path(project_id, page)), [r.bbox for r in page.regions])
             earlier = [story[p] for p in all_ids[:idx] if p in story]
             result = translator.translate_page(project, page, prev_page=prev_page, next_page=next_page, story=earlier,
@@ -443,7 +444,8 @@ class Processor:
         s = self.settings.value
         quality = self.profile().quality if s.translation.quality == "auto" else s.translation.quality
         client = create_client(s.llm, self.runtime, self.library)
-        return ContextualTranslator(client, self.llm_model(), s.translation.model_copy(update={"quality": quality}))
+        # Los modelos de traducción dedicados (PLaMo 3 Translate, Hy-MT2…) usan el formato de texto plano; el resto, el contextual.
+        return make_translator(client, self.llm_model(), s.translation.model_copy(update={"quality": quality}), self.library)
 
     def translate_single(self, project_id: str, page_id: str, region_ids: list[str]) -> list[Region]:
         """Retraduce textos concretos con todo el contexto de su página."""

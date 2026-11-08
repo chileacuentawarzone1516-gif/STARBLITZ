@@ -38,7 +38,9 @@ Detalle y estado por etapa en [MOTOR-AUDITORIA](MOTOR-AUDITORIA.md), [MODELOS-IN
 | Segundo plano en Android (servicio en primer plano) | ⏳ diseño |
 | Estilo visual del texto | ⏳ diseño |
 | Actualizador integrado | 🧪 comparación de versiones y validación del manifiesto; ⏳ descarga e instalación (decisiones pendientes) |
-| Comparativa de modelos de OCR y traducción | ⏳ metadatos recopilados; sin mediciones ni ganador |
+| Comparativa de modelos de traducción | 🧪 medida en PC (CPU) con corpus propio, 4 familias; ⏳ sin medir en el teléfono ni evaluada por personas; sin modelo por defecto nuevo ([BENCHMARK](BENCHMARK-TRADUCCION.md)) |
+| Traducción en texto plano por lotes (modelos dedicados) | 🧪 implementada (móvil y PC) y probada con modelo simulado; ⏳ falta medir en el teléfono |
+| Comparativa de modelos de OCR | ⏳ metadatos recopilados; sin mediciones |
 
 ## Limitaciones conocidas que podrían abordarse
 

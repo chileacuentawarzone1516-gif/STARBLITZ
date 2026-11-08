@@ -3,6 +3,9 @@
 Todos los modelos son de pesos abiertos con licencia Apache‑2.0 y están publicados en
 Hugging Face en formato GGUF cuantizado (Q4/Q5; las versiones «QAT» de Gemma 4 se entrenaron
 ya conscientes de la cuantización a 4 bits, por lo que conservan casi toda la calidad).
+Los modelos de TRADUCCIÓN dedicados (Hy‑MT2; también PLaMo 3 Translate si el usuario lo instala desde
+la búsqueda, pues su «PLaMo Community License» no es permisiva y no entra en el catálogo curado) usan
+el formato de texto plano (`translate/plain.py`). No se recomiendan por defecto hasta medirlos en el teléfono.
 Los tamaños son los reales de los archivos en el repositorio (noviembre 2026); antes de
 instalar, la app vuelve a consultar el repositorio y verifica tamaño y SHA‑256 del archivo.
 
@@ -75,6 +78,15 @@ CATALOG: tuple[CuratedModel, ...] = (
         summary="Punto de equilibrio para móviles de gama media y portátiles modestos. Familia con especial énfasis en "
                 "japonés, chino y coreano; cabe en un teléfono de 6 GB de RAM.",
         tags=("equilibrado", "móvil"),
+    ),
+    CuratedModel(
+        id="hy-mt2-1.8b-q4km", label="Hy-MT2 1.8B (traducción dedicada)", family="hy-mt2",
+        params_b=1.8, active_b=1.8, repo="tencent/Hy-MT2-1.8B-GGUF", file=FileRef("Hy-MT2-1.8B-Q4_K_M.gguf", 1_133_080_448),
+        mmproj=None, quant="Q4_K_M", license="Apache-2.0", context_native=8_192, tiers=(),
+        summary="Modelo de traducción dedicado de Tencent (1,1 GB) con licencia Apache-2.0 y 33 idiomas, incluidos japonés, coreano y español. "
+                "En las pruebas en PC fue más fiel y mucho más rápido que Qwen 2B, y menos fiel que PLaMo en japonés. Admite terminología "
+                "(glosario). Sin medir aún en el teléfono.",
+        languages="33 idiomas (japonés, coreano, inglés, español…)", tags=("traducción dedicada", "licencia permisiva", "móvil"),
     ),
     CuratedModel(
         id="qwen3.5-4b-q5km", label="Qwen 3.5 4B (Q5, más precisión)", family="qwen3.5", params_b=4.0, active_b=4.0,

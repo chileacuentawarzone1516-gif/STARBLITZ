@@ -46,6 +46,11 @@ export const fakeRuntime: LlmRuntime = {
   async unload() { /* nada */ },
 };
 
+/** «Traducciones» del simulador de texto plano (sin caracteres CJK: una traducción real no los lleva). */
+export const SPANISH: Record<string, string> = {
+  'おはよう': 'Buenos días', 'どこへ行くの？': '¿Adónde vas?', 'ありがとう': 'Gracias', '先輩！': '¡Senpai!', '待って': 'Espera', 'さようなら': 'Adiós',
+};
+
 export interface FakePage { texts: string[]; fail?: boolean }
 
 /** Mide si la visión y el modelo trabajaron A LA VEZ (solapamiento) y cuántas llamadas simultáneas hubo como máximo. */
@@ -143,6 +148,25 @@ export class FakeLlm extends LLMClient {
   hook: ((call: LlmCall) => Promise<void> | void) | null = null;
   constructor() { super({ temperature: 0.3, timeout_s: 60, use_vision: true }); }
   async health() { return { ok: this.healthy }; }
+  /** Llamadas de texto plano (traductores dedicados) y cómo contestar a cada una. */
+  plainCalls: { messages: ChatMessage[]; extra: Record<string, unknown> }[] = [];
+  plainReply: ((messages: ChatMessage[], extra: Record<string, unknown>) => string | null | undefined) | null = null;
+  refusePlain: (text: string) => boolean = () => false;
+  override async chatPlain(messages: ChatMessage[], opts: { extra?: Record<string, unknown> }): Promise<string> {
+    const extra = opts.extra ?? {};
+    this.plainCalls.push({ messages, extra });
+    this.probe.enter('llm');
+    try { await sleep(2); } finally { this.probe.leave('llm'); }
+    const custom = this.plainReply?.(messages, extra);
+    if (custom !== null && custom !== undefined) return custom;
+    const tr = (s: string) => (this.refusePlain(s) ? 'Lo siento, no puedo ayudar con eso.' : (SPANISH[s] ?? `ES(${s})`));
+    const user = messages[messages.length - 1].content;
+    const numberedLines = user.split('\n').map((l) => /^\[(\d+)\] (.*)$/.exec(l)).filter((m): m is RegExpExecArray => !!m);
+    if (numberedLines.length) return numberedLines.map((m) => `[${m[1]}] ${tr(m[2])}`).join('\n');
+    if ('chat_template_kwargs' in extra && (extra.chat_template_kwargs as { target_lang?: string }).target_lang) return user.split('\n').map(tr).join('\n');
+    return tr(user.split('\n\n').pop() ?? user);
+  }
+
   protected async chat(messages: ChatMessage[], schema: object): Promise<string> {
     const user = messages.find((m) => m.role === 'user')!;
     const kind = 'new_terms' in (schema as { properties: object }).properties ? 'translate' : 'review';

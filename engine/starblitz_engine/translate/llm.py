@@ -73,6 +73,11 @@ class LLMClient:
             ]
             return parse_json(self._chat(repair, schema, model=model, temperature=0.1, cancel=cancel))
 
+    def chat_plain(self, messages: list[ChatMessage], *, model: str, temperature: float = 0.0, max_tokens: int = 1024,
+                   extra: dict | None = None, cancel: threading.Event | None = None) -> str:
+        """Chat de texto plano (sin esquema JSON): devuelve lo que el modelo escribe. `extra` se mezcla en el cuerpo."""
+        raise LLMUnavailableError("Este proveedor no admite la traducción en texto plano.")
+
     def health(self) -> dict:
         raise NotImplementedError
 
@@ -165,6 +170,31 @@ class OllamaClient(LLMClient):
             raise LLMUnavailableError(f"Ollama devolvió un error: {detail}")
         return (r.json().get("message") or {}).get("content", "")
 
+    def chat_plain(self, messages: list[ChatMessage], *, model: str, temperature: float = 0.0, max_tokens: int = 1024,
+                   extra: dict | None = None, cancel: threading.Event | None = None) -> str:
+        if cancel and cancel.is_set():
+            raise CancelledError()
+        sysmsg = plamo_system_message(extra)
+        msgs = ([sysmsg] if sysmsg else []) + list(messages)
+        payload: dict[str, Any] = {
+            "model": model, "stream": False, "keep_alive": "20m",
+            "options": {"temperature": temperature, "num_ctx": self.s.context_window, "num_predict": max_tokens},
+            "messages": [{"role": m.role, "content": m.content} for m in msgs],
+        }
+        if self.model_info(model).thinking:
+            payload["think"] = False
+        try:
+            r = httpx.post(self._url("/api/chat"), json=payload, timeout=self._timeout())
+        except httpx.TimeoutException as exc:
+            raise LLMUnavailableError("El modelo tardó demasiado en responder. Prueba un modelo más ligero o aumenta el tiempo de espera.") from exc
+        except httpx.HTTPError as exc:
+            raise LLMUnavailableError(_unreachable_msg()) from exc
+        if r.status_code == 404:
+            raise LLMUnavailableError(f"El modelo «{model}» no está instalado en Ollama. Descárgalo en Configuración → Modelos.")
+        if r.status_code >= 400:
+            raise LLMUnavailableError(f"Ollama devolvió un error: {_safe_error(r)}")
+        return (r.json().get("message") or {}).get("content", "")
+
     def _message(self, m: ChatMessage, vision: bool) -> dict:
         msg: dict[str, Any] = {"role": m.role, "content": m.content}
         if m.images and vision and self.s.use_vision:
@@ -211,6 +241,24 @@ class OpenAICompatibleClient(LLMClient):
             "response_format": {"type": "json_schema", "json_schema": {"name": "respuesta", "schema": schema, "strict": True}},
         }
 
+    def chat_plain(self, messages: list[ChatMessage], *, model: str, temperature: float = 0.0, max_tokens: int = 1024,
+                   extra: dict | None = None, cancel: threading.Event | None = None) -> str:
+        if cancel and cancel.is_set():
+            raise CancelledError()
+        sysmsg = plamo_system_message(extra)
+        msgs = ([sysmsg] if sysmsg else []) + list(messages)
+        payload = {"model": model, "temperature": temperature, "max_tokens": max_tokens,
+                   "messages": [{"role": m.role, "content": m.content} for m in msgs],
+                   **(_without_kwargs(extra) if sysmsg else (extra or {}))}
+        try:
+            r = httpx.post(self._url("/chat/completions"), json=payload, headers=self._headers(), timeout=self._timeout())
+        except httpx.HTTPError as exc:
+            raise LLMUnavailableError("No se pudo conectar con el servidor compatible con OpenAI configurado.") from exc
+        if r.status_code >= 400:
+            raise LLMUnavailableError(f"El servidor devolvió un error: {_safe_error(r)}")
+        choices = r.json().get("choices") or [{}]
+        return (choices[0].get("message") or {}).get("content", "")
+
     def _chat(self, messages: list[ChatMessage], schema: dict, *, model: str, temperature: float,
               cancel: threading.Event | None = None) -> str:
         payload = self._payload(messages, schema, model=model, temperature=temperature)
@@ -254,11 +302,26 @@ class BuiltinClient(OpenAICompatibleClient):
         })
         return payload
 
+    def chat_plain(self, messages: list[ChatMessage], *, model: str, temperature: float = 0.0, max_tokens: int = 1024,
+                   extra: dict | None = None, cancel: threading.Event | None = None) -> str:
+        if cancel and cancel.is_set():
+            raise CancelledError()
+        payload = {
+            "model": model, "temperature": temperature, "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "stream": True, "stream_options": {"include_usage": True}, "cache_prompt": True, "max_tokens": max_tokens,
+            "chat_template_kwargs": {"enable_thinking": False},  # los modelos con plantilla propia lo reciben en `extra` y lo sustituye
+            **(extra or {}),
+        }
+        return self._stream(payload, model, cancel)
+
     def _chat(self, messages: list[ChatMessage], schema: dict, *, model: str, temperature: float,
               cancel: threading.Event | None = None) -> str:
+        return self._stream(self._payload(messages, schema, model=model, temperature=temperature), model, cancel)
+
+    def _stream(self, payload: dict, model: str, cancel: threading.Event | None) -> str:
+        """Petición en streaming al `llama-server` integrado (compartida por la llamada con JSON y la de texto plano)."""
         cancel = cancel or threading.Event()
         with self.runtime.use(model, cancel) as ep:
-            payload = self._payload(messages, schema, model=model, temperature=temperature)
             headers = {"Authorization": f"Bearer {ep.api_key}"}
             parts: list[str] = []
             started = time.monotonic()
@@ -297,6 +360,24 @@ class BuiltinClient(OpenAICompatibleClient):
             self.last_stats = {"tokens": tokens, "seconds": round(elapsed, 2),
                                "tps": round(tokens / elapsed, 1) if tokens else 0.0}
             return "".join(parts)
+
+
+def plamo_system_message(extra: dict | None) -> ChatMessage | None:
+    """Servidores que no pueden pasar `chat_template_kwargs` (Ollama, LM Studio…): PLaMo acepta sus opciones en un mensaje de sistema
+    que empieza por «[plamo-translate]» (ver la ficha del modelo)."""
+    kw = (extra or {}).get("chat_template_kwargs") or {}
+    if not kw.get("target_lang"):
+        return None
+    lines = ["[plamo-translate]", f"target_lang={kw['target_lang']}"]
+    if kw.get("source_lang"):
+        lines.append(f"source_lang={kw['source_lang']}")
+    for g in kw.get("glossary") or []:
+        lines.append(f"glossary={g['source']} => {g['target']}")
+    return ChatMessage("system", "\n".join(lines))
+
+
+def _without_kwargs(extra: dict | None) -> dict:
+    return {k: v for k, v in (extra or {}).items() if k != "chat_template_kwargs"}
 
 
 def create_client(settings: LLMSettings, runtime=None, library=None) -> LLMClient:

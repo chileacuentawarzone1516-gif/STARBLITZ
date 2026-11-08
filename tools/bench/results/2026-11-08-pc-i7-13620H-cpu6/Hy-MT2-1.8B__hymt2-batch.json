@@ -1,0 +1,1486 @@
+{
+ "summary": {
+  "label": "Hy-MT2-1.8B-Q4_K_M.gguf · hymt2 · batch",
+  "model": "Hy-MT2-1.8B-Q4_K_M.gguf",
+  "model_mb": 1133,
+  "profile": "hymt2",
+  "mode": "batch",
+  "gloss": false,
+  "threads": 6,
+  "ngl": 0,
+  "ctx": 4096,
+  "segments": 56,
+  "calls": 19,
+  "wall_total_s": 55.36,
+  "wall_per_segment_s": 0.989,
+  "prompt_tokens": 2032,
+  "completion_tokens": 984,
+  "completion_per_segment": 17.6,
+  "gen_tps_avg": 23.6,
+  "rss_idle_mb": 1559,
+  "rss_peak_mb": 1789,
+  "load_s": 2.6,
+  "ok": 35,
+  "empty": 0,
+  "refusal": 0,
+  "untranslated": 0,
+  "english_leak": 0,
+  "omission_suspect": 1,
+  "addition_suspect": 0,
+  "keep_failed": 21,
+  "by_cat": {
+   "normal": "3/7",
+   "coloquial": "4/6",
+   "insulto": "3/7",
+   "doble_sentido": "4/5",
+   "humor": "1/5",
+   "incompleta": "5/5",
+   "onomatopeya": "5/5",
+   "adulto": "6/6",
+   "violencia": "4/5",
+   "terminologia": "0/5"
+  },
+  "host": {
+   "cpu_count": 16,
+   "platform": "win32"
+  },
+  "server": "llama-server.exe",
+  "note": "Tiempos de ESTE equipo: no representan al teléfono. Los recuentos de tokens sí son independientes del dispositivo."
+ },
+ "calls": [
+  {
+   "scene": "ja-escuela",
+   "n_items": 4,
+   "wall_s": 3.652,
+   "prompt_tokens": 122,
+   "completion_tokens": 82,
+   "prompt_n_new": 119,
+   "prompt_ms": 205.482,
+   "predicted_ms": 3425.557,
+   "predicted_per_second": 23.6457895752428
+  },
+  {
+   "scene": "ja-coloq",
+   "n_items": 4,
+   "wall_s": 2.766,
+   "prompt_tokens": 127,
+   "completion_tokens": 60,
+   "prompt_n_new": 67,
+   "prompt_ms": 187.557,
+   "predicted_ms": 2553.015,
+   "predicted_per_second": 23.10993080730039
+  },
+  {
+   "scene": "ja-insultos",
+   "n_items": 4,
+   "wall_s": 3.023,
+   "prompt_tokens": 123,
+   "completion_tokens": 68,
+   "prompt_n_new": 63,
+   "prompt_ms": 190.95,
+   "predicted_ms": 2823.463,
+   "predicted_per_second": 23.729724809568957
+  },
+  {
+   "scene": "ja-doble",
+   "n_items": 3,
+   "wall_s": 3.057,
+   "prompt_tokens": 112,
+   "completion_tokens": 51,
+   "prompt_n_new": 52,
+   "prompt_ms": 895.688,
+   "predicted_ms": 2153.305,
+   "predicted_per_second": 23.220119769377774
+  },
+  {
+   "scene": "ja-humor",
+   "n_items": 3,
+   "wall_s": 3.742,
+   "prompt_tokens": 113,
+   "completion_tokens": 62,
+   "prompt_n_new": 53,
+   "prompt_ms": 1069.797,
+   "predicted_ms": 2645.584,
+   "predicted_per_second": 23.057290942188946
+  },
+  {
+   "scene": "ja-incompleta",
+   "n_items": 3,
+   "wall_s": 2.524,
+   "prompt_tokens": 98,
+   "completion_tokens": 35,
+   "prompt_n_new": 38,
+   "prompt_ms": 1049.968,
+   "predicted_ms": 1465.288,
+   "predicted_per_second": 23.2036295936362
+  },
+  {
+   "scene": "ja-sfx",
+   "n_items": 3,
+   "wall_s": 1.655,
+   "prompt_tokens": 85,
+   "completion_tokens": 30,
+   "prompt_n_new": 25,
+   "prompt_ms": 413.164,
+   "predicted_ms": 1232.861,
+   "predicted_per_second": 23.522522003697087
+  },
+  {
+   "scene": "ja-adulto",
+   "n_items": 4,
+   "wall_s": 3.91,
+   "prompt_tokens": 130,
+   "completion_tokens": 66,
+   "prompt_n_new": 70,
+   "prompt_ms": 1125.006,
+   "predicted_ms": 2782.077,
+   "predicted_per_second": 23.3638393186098
+  },
+  {
+   "scene": "ja-violencia",
+   "n_items": 3,
+   "wall_s": 3.438,
+   "prompt_tokens": 113,
+   "completion_tokens": 58,
+   "prompt_n_new": 53,
+   "prompt_ms": 1042.13,
+   "predicted_ms": 2384.537,
+   "predicted_per_second": 23.904011554444324
+  },
+  {
+   "scene": "ja-fantasia",
+   "n_items": 5,
+   "wall_s": 6.028,
+   "prompt_tokens": 151,
+   "completion_tokens": 115,
+   "prompt_n_new": 91,
+   "prompt_ms": 1124.459,
+   "predicted_ms": 4888.925,
+   "predicted_per_second": 23.31800958288376
+  },
+  {
+   "scene": "ko-escuela",
+   "n_items": 3,
+   "wall_s": 3.777,
+   "prompt_tokens": 111,
+   "completion_tokens": 63,
+   "prompt_n_new": 101,
+   "prompt_ms": 1140.552,
+   "predicted_ms": 2604.711,
+   "predicted_per_second": 23.803024596586724
+  },
+  {
+   "scene": "ko-coloq",
+   "n_items": 2,
+   "wall_s": 1.781,
+   "prompt_tokens": 90,
+   "completion_tokens": 34,
+   "prompt_n_new": 31,
+   "prompt_ms": 400.274,
+   "predicted_ms": 1370.928,
+   "predicted_per_second": 24.07128601939708
+  },
+  {
+   "scene": "ko-insultos",
+   "n_items": 3,
+   "wall_s": 2.954,
+   "prompt_tokens": 110,
+   "completion_tokens": 46,
+   "prompt_n_new": 51,
+   "prompt_ms": 1034.8,
+   "predicted_ms": 1913.097,
+   "predicted_per_second": 23.522069189382453
+  },
+  {
+   "scene": "ko-doble",
+   "n_items": 2,
+   "wall_s": 2.753,
+   "prompt_tokens": 92,
+   "completion_tokens": 40,
+   "prompt_n_new": 33,
+   "prompt_ms": 1069.555,
+   "predicted_ms": 1672.468,
+   "predicted_per_second": 23.318831810234933
+  },
+  {
+   "scene": "ko-humor",
+   "n_items": 2,
+   "wall_s": 3.332,
+   "prompt_tokens": 108,
+   "completion_tokens": 55,
+   "prompt_n_new": 49,
+   "prompt_ms": 1065.904,
+   "predicted_ms": 2258.469,
+   "predicted_per_second": 23.910002749650317
+  },
+  {
+   "scene": "ko-incompleta",
+   "n_items": 2,
+   "wall_s": 1.443,
+   "prompt_tokens": 84,
+   "completion_tokens": 26,
+   "prompt_n_new": 25,
+   "prompt_ms": 380.775,
+   "predicted_ms": 1033.524,
+   "predicted_per_second": 24.18908511074731
+  },
+  {
+   "scene": "ko-sfx",
+   "n_items": 2,
+   "wall_s": 1.025,
+   "prompt_tokens": 72,
+   "completion_tokens": 19,
+   "prompt_n_new": 13,
+   "prompt_ms": 274.245,
+   "predicted_ms": 747.837,
+   "predicted_per_second": 24.069416196310158
+  },
+  {
+   "scene": "ko-adulto",
+   "n_items": 2,
+   "wall_s": 1.729,
+   "prompt_tokens": 90,
+   "completion_tokens": 32,
+   "prompt_n_new": 31,
+   "prompt_ms": 411.373,
+   "predicted_ms": 1291.046,
+   "predicted_per_second": 24.01153793125884
+  },
+  {
+   "scene": "ko-violencia",
+   "n_items": 2,
+   "wall_s": 2.762,
+   "prompt_tokens": 101,
+   "completion_tokens": 42,
+   "prompt_n_new": 42,
+   "prompt_ms": 1036.9,
+   "predicted_ms": 1717.751,
+   "predicted_per_second": 23.868418647405825
+  }
+ ],
+ "items": [
+  {
+   "id": "j01",
+   "lang": "ja",
+   "cat": "normal",
+   "src": "おはよう、愛子。今日は早いね。",
+   "ref": "Buenos días, Aiko. Hoy llegas temprano.",
+   "out": "Buenos días, Ai-ko. Hoy es temprano, ¿verdad?",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "Aiko"
+    ],
+    "keep_ok": false,
+    "len_ratio": 1.15,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": "[1] Buenos días, Ai-ko. Hoy es temprano, ¿verdad?\n[2] Después de la clase, te esperaré en el techo.\n[3] ¿Cómo resuelvo este problema?\n[4] El pronóstico del clima dijo que mañana hará lluvia."
+  },
+  {
+   "id": "j02",
+   "lang": "ja",
+   "cat": "normal",
+   "src": "放課後、屋上で待ってる。",
+   "ref": "Te espero en la azotea después de clases.",
+   "out": "Después de la clase, te esperaré en el techo.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "azotea"
+    ],
+    "keep_ok": false,
+    "len_ratio": 1.1,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": ""
+  },
+  {
+   "id": "j03",
+   "lang": "ja",
+   "cat": "normal",
+   "src": "この問題、どうやって解くの？",
+   "ref": "¿Cómo se resuelve este problema?",
+   "out": "¿Cómo resuelvo este problema?",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.91,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j04",
+   "lang": "ja",
+   "cat": "normal",
+   "src": "明日は雨になるって天気予報で言ってたよ。",
+   "ref": "El pronóstico del tiempo dijo que mañana va a llover.",
+   "out": "El pronóstico del clima dijo que mañana hará lluvia.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.98,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j05",
+   "lang": "ja",
+   "cat": "coloquial",
+   "src": "マジかよ！ありえねぇ！",
+   "ref": "¡¿En serio?! ¡Eso es imposible!",
+   "out": "¡Vaya! ¡Es imposible!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "serio"
+    ],
+    "keep_ok": false,
+    "len_ratio": 0.68,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": "[1] ¡Vaya! ¡Es imposible!\n[2] Espera un momento, escucha hasta el final la conversación.\n[3] ¡Qué molesto… vámonos ya.\n[4] ¡Maldita sea, llegaré tarde!"
+  },
+  {
+   "id": "j06",
+   "lang": "ja",
+   "cat": "coloquial",
+   "src": "ちょっと待てって、話は最後まで聞けよ。",
+   "ref": "Espera un momento, escúchame hasta el final.",
+   "out": "Espera un momento, escucha hasta el final la conversación.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 1.32,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j07",
+   "lang": "ja",
+   "cat": "coloquial",
+   "src": "めんどくせぇなぁ…もう帰ろうぜ。",
+   "ref": "Qué fastidio... mejor vámonos ya.",
+   "out": "¡Qué molesto… vámonos ya.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.76,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j08",
+   "lang": "ja",
+   "cat": "coloquial",
+   "src": "やべっ、遅刻する！",
+   "ref": "¡Rayos, voy a llegar tarde!",
+   "out": "¡Maldita sea, llegaré tarde!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 1.04,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j09",
+   "lang": "ja",
+   "cat": "insulto",
+   "src": "てめぇ、ふざけんな！ぶっ殺すぞ！",
+   "ref": "¡Maldito, no te burles de mí! ¡Te voy a matar!",
+   "out": "¡Tú, no juegues! ¡Te mataré!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "maldit"
+    ],
+    "keep_ok": false,
+    "len_ratio": 0.61,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": "[1] ¡Tú, no juegues! ¡Te mataré!\n[2] ¡Este idiota! ¡No vuelvas a aparecer!\n[3] ¡Tonto! ¡Idiota! ¡Pervertido!\n[4] ¡Muere, ese cerdo!"
+  },
+  {
+   "id": "j10",
+   "lang": "ja",
+   "cat": "insulto",
+   "src": "このクソ野郎が！二度と顔を見せるな！",
+   "ref": "¡Maldito hijo de puta! ¡No vuelvas a mostrar tu cara!",
+   "out": "¡Este idiota! ¡No vuelvas a aparecer!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "mierda",
+     "cara"
+    ],
+    "keep_ok": false,
+    "len_ratio": 0.7,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": ""
+  },
+  {
+   "id": "j11",
+   "lang": "ja",
+   "cat": "insulto",
+   "src": "バカ！アホ！変態！",
+   "ref": "¡Idiota! ¡Tonto! ¡Pervertido!",
+   "out": "¡Tonto! ¡Idiota! ¡Pervertido!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 1.0,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j12",
+   "lang": "ja",
+   "cat": "insulto",
+   "src": "死ね、このブタ！",
+   "ref": "¡Muérete, cerdo!",
+   "out": "¡Muere, ese cerdo!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 1.12,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j13",
+   "lang": "ja",
+   "cat": "doble_sentido",
+   "src": "今夜は寝かせないからね。",
+   "ref": "Esta noche no te voy a dejar dormir.",
+   "out": "Esta noche no la dejaré dormir.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.86,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": "[1] Esta noche no la dejaré dormir.  \n[2] Lo de la senior, grande y impresionante…  \n[3] Bajaré la comida… La disfrutaré lentamente."
+  },
+  {
+   "id": "j14",
+   "lang": "ja",
+   "cat": "doble_sentido",
+   "src": "先輩のそれ、大きくて立派ですね…",
+   "ref": "Eso de sempai es grande e imponente, ¿no...?",
+   "out": "Lo de la senior, grande y impresionante…",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.91,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j15",
+   "lang": "ja",
+   "cat": "doble_sentido",
+   "src": "いただきます…ゆっくり味わわせてもらうね。",
+   "ref": "Itadakimasu... déjame saborearlo despacio.",
+   "out": "Bajaré la comida… La disfrutaré lentamente.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "despacio"
+    ],
+    "keep_ok": false,
+    "len_ratio": 1.02,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": ""
+  },
+  {
+   "id": "j16",
+   "lang": "ja",
+   "cat": "humor",
+   "src": "俺の金運？ああ、財布の中なら常に冬だよ。",
+   "ref": "¿Mi suerte con el dinero? Ah, dentro de mi cartera siempre es invierno.",
+   "out": "¿Mi suerte en dinero? Ah, siempre es invierno dentro del bolsillo.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "cartera"
+    ],
+    "keep_ok": false,
+    "len_ratio": 0.93,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": "[1] ¿Mi suerte en dinero? Ah, siempre es invierno dentro del bolsillo.  \n[2] La cama voló por los aires.  \n[3] Pff, ahahahaha! Uf, me duele el estómago."
+  },
+  {
+   "id": "j17",
+   "lang": "ja",
+   "cat": "humor",
+   "src": "布団が吹っ飛んだ！",
+   "ref": "¡El futón salió volando! (juego de palabras intraducible: futon ga futtonda)",
+   "out": "La cama voló por los aires.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "futón"
+    ],
+    "keep_ok": false,
+    "len_ratio": 0.36,
+    "omission_suspect": true,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": ""
+  },
+  {
+   "id": "j18",
+   "lang": "ja",
+   "cat": "humor",
+   "src": "ぷっ、あはははは！ひーっ、お腹痛い！",
+   "ref": "¡Pfff, jajajaja! ¡Ay, me duele la barriga!",
+   "out": "Pff, ahahahaha! Uf, me duele el estómago.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "jaja"
+    ],
+    "keep_ok": false,
+    "len_ratio": 0.98,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": ""
+  },
+  {
+   "id": "j19",
+   "lang": "ja",
+   "cat": "incompleta",
+   "src": "だって、私は…その…",
+   "ref": "Es que yo... bueno...",
+   "out": "Porque yo… ese…",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.71,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": "[1] Porque yo… ese…\n[2] Si en ese momento… no, nada.\n[3] Tú, ¿en serio…?"
+  },
+  {
+   "id": "j20",
+   "lang": "ja",
+   "cat": "incompleta",
+   "src": "もしあの時…いや、なんでもない。",
+   "ref": "Si en ese momento... no, no es nada.",
+   "out": "Si en ese momento… no, nada.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.78,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j21",
+   "lang": "ja",
+   "cat": "incompleta",
+   "src": "お前、まさか…",
+   "ref": "No me digas que tú...",
+   "out": "Tú, ¿en serio…?",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.71,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j22",
+   "lang": "ja",
+   "cat": "onomatopeya",
+   "src": "ドンッ！",
+   "ref": "¡PUM! (o mantener ドンッ)",
+   "out": "¡Dong!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.27,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": "[1] ¡Dong!  \n[2] ¡Zawa... zawa...!  \n[3] ¡Gashan!"
+  },
+  {
+   "id": "j23",
+   "lang": "ja",
+   "cat": "onomatopeya",
+   "src": "ざわ…ざわ…",
+   "ref": "(murmullos...) o mantener ざわ…",
+   "out": "¡Zawa... zawa...!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.59,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j24",
+   "lang": "ja",
+   "cat": "onomatopeya",
+   "src": "ガシャーン！",
+   "ref": "¡CRASH! (o mantener ガシャーン)",
+   "out": "¡Gashan!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.31,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j25",
+   "lang": "ja",
+   "cat": "adulto",
+   "src": "あっ…そこ、だめ…んっ…",
+   "ref": "Ah... ahí no... mmh...",
+   "out": "Ah… ahí, no… mmm…",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.77,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": "[1] Ah… ahí, no… mmm…\n[2] Quítate la ropa. Muéstrame todo.\n[3] Tu cuerpo es mío. Nadie puede tocarlo.\n[4] Da un sonido obsceno… déjame escuchar más."
+  },
+  {
+   "id": "j26",
+   "lang": "ja",
+   "cat": "adulto",
+   "src": "服を脱いで。全部見せて。",
+   "ref": "Quítate la ropa. Muéstramelo todo.",
+   "out": "Quítate la ropa. Muéstrame todo.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.94,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j27",
+   "lang": "ja",
+   "cat": "adulto",
+   "src": "お前の体は俺のものだ。誰にも触らせない。",
+   "ref": "Tu cuerpo es mío. No dejaré que nadie lo toque.",
+   "out": "Tu cuerpo es mío. Nadie puede tocarlo.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.81,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j28",
+   "lang": "ja",
+   "cat": "adulto",
+   "src": "いやらしい声出して…もっと聞かせてよ。",
+   "ref": "Haciendo esos sonidos obscenos... déjame oír más.",
+   "out": "Da un sonido obsceno… déjame escuchar más.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.86,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j29",
+   "lang": "ja",
+   "cat": "violencia",
+   "src": "骨が砕ける音がした。血が止まらない…！",
+   "ref": "Se oyó el crujido de huesos rompiéndose. ¡La sangre no deja de salir...!",
+   "out": "Se escuchó el sonido de los huesos rompiéndose. La sangre no para…!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.93,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": "[1] Se escuchó el sonido de los huesos rompiéndose. La sangre no para…!\n[2] Cortaré tu garganta. Muere sufriendo.\n[3] El brazo de este tipo está roto…"
+  },
+  {
+   "id": "j30",
+   "lang": "ja",
+   "cat": "violencia",
+   "src": "喉を切り裂いてやる。苦しみながら死ね。",
+   "ref": "Te voy a rajar la garganta. Muere sufriendo.",
+   "out": "Cortaré tu garganta. Muere sufriendo.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.84,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j31",
+   "lang": "ja",
+   "cat": "violencia",
+   "src": "こいつの腕、ちぎれてるぞ…",
+   "ref": "A este tipo le han arrancado el brazo...",
+   "out": "El brazo de este tipo está roto…",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.8,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "j32",
+   "lang": "ja",
+   "cat": "terminologia",
+   "src": "勇者ケンタよ、魔王城へ向かうのだ。",
+   "ref": "Héroe Kenta, dirígete al Castillo del Rey Demonio.",
+   "out": "¡Oh, valiente Kenta, debes dirigirte a la ciudad del Rey Demonio!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "Héroe",
+     "Castillo del Rey Demonio"
+    ],
+    "keep_ok": false,
+    "len_ratio": 1.3,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": "[1] ¡Oh, valiente Kenta, debes dirigirte a la ciudad del Rey Demonio!  \n[2] En la ciudad del Rey Demonio, los Cuatro Reyes te esperan.  \n[3] ¡Kenta, no olvides la espada del valiente!  \n[4] Parece que la maestra Aiko tiene un mapa de la ciudad del Rey Demonio.  \n[5] Uno de los Cuatro Reyes, Gald, ha aparecido!"
+  },
+  {
+   "id": "j33",
+   "lang": "ja",
+   "cat": "terminologia",
+   "src": "魔王城には四天王が待ち構えている。",
+   "ref": "En el Castillo del Rey Demonio esperan los Cuatro Reyes Celestiales.",
+   "out": "En la ciudad del Rey Demonio, los Cuatro Reyes te esperan.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "Castillo del Rey Demonio",
+     "Cuatro Reyes Celestiales"
+    ],
+    "keep_ok": false,
+    "len_ratio": 0.85,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": ""
+  },
+  {
+   "id": "j34",
+   "lang": "ja",
+   "cat": "terminologia",
+   "src": "ケンタ、勇者の剣を忘れないで！",
+   "ref": "¡Kenta, no olvides la espada del Héroe!",
+   "out": "¡Kenta, no olvides la espada del valiente!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "Héroe"
+    ],
+    "keep_ok": false,
+    "len_ratio": 1.08,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": ""
+  },
+  {
+   "id": "j35",
+   "lang": "ja",
+   "cat": "terminologia",
+   "src": "アイコ先輩は魔王城の地図を持っているらしい。",
+   "ref": "Dicen que la senpai Aiko tiene el mapa del Castillo del Rey Demonio.",
+   "out": "Parece que la maestra Aiko tiene un mapa de la ciudad del Rey Demonio.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "senpai",
+     "Castillo del Rey Demonio"
+    ],
+    "keep_ok": false,
+    "len_ratio": 1.03,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": ""
+  },
+  {
+   "id": "j36",
+   "lang": "ja",
+   "cat": "terminologia",
+   "src": "四天王の一人、ガルドが現れた！",
+   "ref": "¡Apareció Garudo, uno de los Cuatro Reyes Celestiales!",
+   "out": "Uno de los Cuatro Reyes, Gald, ha aparecido!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "Garudo",
+     "Cuatro Reyes Celestiales"
+    ],
+    "keep_ok": false,
+    "len_ratio": 0.81,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": ""
+  },
+  {
+   "id": "k01",
+   "lang": "ko",
+   "cat": "normal",
+   "src": "안녕, 민수야. 오늘 일찍 왔네.",
+   "ref": "Hola, Minsu. Hoy llegaste temprano.",
+   "out": "Hola, Minsoo. Has llegado temprano hoy.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "Minsu"
+    ],
+    "keep_ok": false,
+    "len_ratio": 1.11,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": "[1] Hola, Minsoo. Has llegado temprano hoy.  \n[2] Esperaré en el techo después de la clase.  \n[3] Se dice que habrá lluvia mañana, así que lleva un paraguas."
+  },
+  {
+   "id": "k02",
+   "lang": "ko",
+   "cat": "normal",
+   "src": "방과 후에 옥상에서 기다릴게.",
+   "ref": "Te espero en la azotea después de clases.",
+   "out": "Esperaré en el techo después de la clase.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "azotea"
+    ],
+    "keep_ok": false,
+    "len_ratio": 1.0,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": ""
+  },
+  {
+   "id": "k03",
+   "lang": "ko",
+   "cat": "normal",
+   "src": "내일 비 온다고 하던데 우산 챙겨.",
+   "ref": "Dicen que mañana va a llover, lleva un paraguas.",
+   "out": "Se dice que habrá lluvia mañana, así que lleva un paraguas.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 1.23,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "k04",
+   "lang": "ko",
+   "cat": "coloquial",
+   "src": "헐, 대박! 진짜야?",
+   "ref": "¡Wow, increíble! ¿De verdad?",
+   "out": "¡Uf, genial! ¿Es real?",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "verdad"
+    ],
+    "keep_ok": false,
+    "len_ratio": 0.79,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": "[1] ¡Uf, genial! ¿Es real?\n[2] Ah, realmente me molesta, deja de hacerlo ya."
+  },
+  {
+   "id": "k05",
+   "lang": "ko",
+   "cat": "coloquial",
+   "src": "아 진짜 짜증나네, 그만 좀 해.",
+   "ref": "Ay, en serio me da rabia, para ya.",
+   "out": "Ah, realmente me molesta, deja de hacerlo ya.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 1.32,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "k06",
+   "lang": "ko",
+   "cat": "insulto",
+   "src": "이 개새끼야, 죽고 싶어?",
+   "ref": "¡Hijo de perra, ¿quieres morir?!",
+   "out": "Este mocoso, ¿quieres morir?",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "hijo de perra"
+    ],
+    "keep_ok": false,
+    "len_ratio": 0.88,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": "[1] Este mocoso, ¿quieres morir?\n[2] Vete, ese mierda inútil!\n[3] Idiota, ¿te has vuelto loco?"
+  },
+  {
+   "id": "k07",
+   "lang": "ko",
+   "cat": "insulto",
+   "src": "꺼져, 이 쓰레기 같은 놈아!",
+   "ref": "¡Lárgate, basura de tipo!",
+   "out": "Vete, ese mierda inútil!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.96,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "k08",
+   "lang": "ko",
+   "cat": "insulto",
+   "src": "미친놈, 정신 나갔냐?",
+   "ref": "Loco de mierda, ¿se te fue la cabeza?",
+   "out": "Idiota, ¿te has vuelto loco?",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "cabeza"
+    ],
+    "keep_ok": false,
+    "len_ratio": 0.76,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": ""
+  },
+  {
+   "id": "k09",
+   "lang": "ko",
+   "cat": "doble_sentido",
+   "src": "오늘 밤에 우리 집에 올래? 라면 먹고 갈래?",
+   "ref": "¿Vienes a mi casa esta noche? ¿Quieres comer ramen y quedarte?",
+   "out": "¿Vendrás a nuestra casa esta noche? ¿Quieres comer ramen y irte?",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 1.03,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": "[1] ¿Vendrás a nuestra casa esta noche? ¿Quieres comer ramen y irte?\n[2] Hermano, ese es realmente grande."
+  },
+  {
+   "id": "k10",
+   "lang": "ko",
+   "cat": "doble_sentido",
+   "src": "형, 그거 진짜 크네요.",
+   "ref": "Hermano, eso sí que es grande.",
+   "out": "Hermano, ese es realmente grande.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 1.1,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "k11",
+   "lang": "ko",
+   "cat": "humor",
+   "src": "내 통장은 항상 겨울이야. 텅 비어서 춥거든.",
+   "ref": "Mi cuenta bancaria siempre es invierno. Está tan vacía que hace frío.",
+   "out": "Mi cuenta bancaria siempre está en invierno. Está vacía y hace frío.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.99,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": "[1] Mi cuenta bancaria siempre está en invierno. Está vacía y hace frío.  \n[2] ㅋㅋㅋㅋ ¡Seguro que se me caerá el ombligo!"
+  },
+  {
+   "id": "k12",
+   "lang": "ko",
+   "cat": "humor",
+   "src": "ㅋㅋㅋㅋ 아 배꼽 빠지겠다.",
+   "ref": "Jajaja, me voy a partir de risa.",
+   "out": "ㅋㅋㅋㅋ ¡Seguro que se me caerá el ombligo!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "jaja"
+    ],
+    "keep_ok": false,
+    "len_ratio": 1.25,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": ""
+  },
+  {
+   "id": "k13",
+   "lang": "ko",
+   "cat": "incompleta",
+   "src": "사실은 나… 너를…",
+   "ref": "La verdad es que yo... a ti...",
+   "out": "En realidad, yo… a ti.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.73,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": "[1] En realidad, yo… a ti.  \n[2] Si en ese momento… no, nada."
+  },
+  {
+   "id": "k14",
+   "lang": "ko",
+   "cat": "incompleta",
+   "src": "그때 만약에… 아니야, 아무것도.",
+   "ref": "Si en ese momento... no, nada.",
+   "out": "Si en ese momento… no, nada.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.93,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "k15",
+   "lang": "ko",
+   "cat": "onomatopeya",
+   "src": "쾅!",
+   "ref": "¡PUM! (o mantener 쾅)",
+   "out": "¡Clang!",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.35,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": "[1] ¡Clang!  \n[2] Corazón acelerado…"
+  },
+  {
+   "id": "k16",
+   "lang": "ko",
+   "cat": "onomatopeya",
+   "src": "두근두근…",
+   "ref": "(tun-tun... latido) o mantener 두근두근",
+   "out": "Corazón acelerado…",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.51,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "k17",
+   "lang": "ko",
+   "cat": "adulto",
+   "src": "아… 거기… 안 돼… 흐읏…",
+   "ref": "Ah... ahí... no... mmh...",
+   "out": "Ah… allí… no está bien… huh…",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 1.12,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": "[1] Ah… allí… no está bien… huh…  \n[2] Quita la ropa. Muéstrame todo."
+  },
+  {
+   "id": "k18",
+   "lang": "ko",
+   "cat": "adulto",
+   "src": "옷 벗어. 전부 보여줘.",
+   "ref": "Quítate la ropa. Muéstramelo todo.",
+   "out": "Quita la ropa. Muéstrame todo.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 0.88,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  },
+  {
+   "id": "k19",
+   "lang": "ko",
+   "cat": "violencia",
+   "src": "칼로 배를 찔렀어. 피가 멈추지 않아!",
+   "ref": "Le clavé el cuchillo en el estómago. ¡La sangre no para!",
+   "out": "Me hirieron en el estómago. La sangre no se detiene.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [
+     "cuchillo"
+    ],
+    "keep_ok": false,
+    "len_ratio": 0.93,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": false
+   },
+   "raw": "[1] Me hirieron en el estómago. La sangre no se detiene.  \n[2] Voy a estrangular a ese hijo de puta hasta matarlo."
+  },
+  {
+   "id": "k20",
+   "lang": "ko",
+   "cat": "violencia",
+   "src": "그놈의 목을 졸라 죽여 버릴 거야.",
+   "ref": "Voy a estrangular a ese tipo hasta matarlo.",
+   "out": "Voy a estrangular a ese hijo de puta hasta matarlo.",
+   "check": {
+    "empty": false,
+    "refusal": false,
+    "untranslated": false,
+    "english_leak": false,
+    "keep_missing": [],
+    "keep_ok": true,
+    "len_ratio": 1.19,
+    "omission_suspect": false,
+    "addition_suspect": false,
+    "ok": true
+   },
+   "raw": ""
+  }
+ ]
+}

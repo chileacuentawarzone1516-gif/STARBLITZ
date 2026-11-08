@@ -13,6 +13,13 @@ las pruebas de [docs/PRUEBAS-HARDWARE.md](docs/PRUEBAS-HARDWARE.md).
 
 ### Añadido
 
+- **Traducción en texto plano por lotes (móvil y PC):** `PlainTranslator` para modelos de traducción dedicados (PLaMo 3 Translate, Hy-MT2): una llamada por
+  página con el formato nativo del modelo, glosario e historial como contexto, reintento solo de lo que falte y nada vacío ni aceptado si el modelo se niega.
+  Medido en PC: el formato actual cuesta ~1 070 tokens de entrada y ~350 de salida por página con Qwen3.5-4B; en texto plano, ~200 y ~45; con PLaMo-0.8B, ~55 y ~42.
+  Los demás modelos siguen con el traductor contextual. Catálogo: añadido Hy-MT2-1.8B (Apache-2.0); sin cambiar el modelo recomendado.
+- **Banco de pruebas de traducción** (`tools/bench`): corpus inventado ja/ko de 56 segmentos en 10 categorías, arnés reproducible y resultados crudos;
+  informe en [docs/BENCHMARK-TRADUCCION.md](docs/BENCHMARK-TRADUCCION.md). Solo en PC: **sin medidas del teléfono**.
+
 - **Informe de rendimiento exportable (móvil):** menú del proyecto → «Exportar informe de rendimiento (JSON)». Reúne
   `project.last_job.timings`, un resumen calculado (tiempos, tokens/s, llamadas y aciertos de caché, batería, temperatura y
   memoria libre del sistema) y el estado del dispositivo; sin tokens, imágenes ni textos. Las muestras del dispositivo se toman

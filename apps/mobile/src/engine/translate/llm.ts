@@ -20,6 +20,12 @@ export interface ChatOptions {
   signal?: AbortSignal;
 }
 
+/** Opciones de una llamada de texto plano (sin JSON): `extra` se mezcla en el cuerpo (p. ej. `chat_template_kwargs`, `stop`). */
+export interface PlainOptions extends ChatOptions {
+  maxTokens?: number;
+  extra?: Record<string, unknown>;
+}
+
 export interface LLMClientSettings {
   temperature: number;
   timeout_s: number;
@@ -69,6 +75,11 @@ export abstract class LLMClient {
         throw new LLMUnavailableError('El modelo no devolvió una respuesta válida. Prueba con otro modelo en la sección Modelos.');
       }
     }
+  }
+
+  /** Chat de texto plano: devuelve lo que el modelo escribe, sin esquema JSON. */
+  async chatPlain(_messages: ChatMessage[], _opts: PlainOptions): Promise<string> {
+    throw new LLMUnavailableError('Este cliente no admite la traducción en texto plano.');
   }
 
   abstract health(): Promise<{ ok: boolean }>;
@@ -129,6 +140,25 @@ export class OpenAICompatibleClient extends LLMClient {
     return data.choices?.[0]?.message?.content ?? '';
   }
 
+  override async chatPlain(messages: ChatMessage[], o: PlainOptions): Promise<string> {
+    if (o.signal?.aborted) throw new CancelledError();
+    const signal = o.signal ? AbortSignal.any([o.signal, AbortSignal.timeout(this.s.timeout_s * 1000)]) : AbortSignal.timeout(this.s.timeout_s * 1000);
+    // Servidores que no pueden pasar `chat_template_kwargs` (Ollama, LM Studio…): PLaMo acepta sus opciones en un mensaje de sistema.
+    const sys = plamoSystemMessage(o.extra);
+    const { chat_template_kwargs: _kw, ...rest } = o.extra ?? {};
+    const all = sys ? [sys, ...messages] : messages;
+    const body = { model: o.model, temperature: o.temperature ?? 0, max_tokens: o.maxTokens ?? 1024, messages: all.map((m) => ({ role: m.role, content: m.content })), ...(sys ? rest : (o.extra ?? {})) };
+    let res: Response;
+    try {
+      res = await fetch(this.url('/chat/completions'), { method: 'POST', headers: this.headers(), body: JSON.stringify(body), signal });
+    } catch (e) {
+      throw this.mapFetchError(e, o.signal);
+    }
+    if (!res.ok) throw new LLMUnavailableError(`El servidor devolvió un error: ${await safeError(res)}`);
+    const data = await res.json() as { choices?: { message?: { content?: string } }[] };
+    return data.choices?.[0]?.message?.content ?? '';
+  }
+
   protected mapFetchError(e: unknown, userSignal?: AbortSignal): Error {
     if (userSignal?.aborted) return new CancelledError();
     if ((e as Error)?.name === 'TimeoutError' || (e as Error)?.name === 'AbortError') {
@@ -162,6 +192,22 @@ export class BuiltinClient extends OpenAICompatibleClient {
   }
 
   protected override async chat(messages: ChatMessage[], schema: object, a: ChatArgs): Promise<string> {
+    return this.stream(a, () => this.payload(messages, schema, a));
+  }
+
+  override async chatPlain(messages: ChatMessage[], o: PlainOptions): Promise<string> {
+    if (o.signal?.aborted) throw new CancelledError();
+    const a: ChatArgs = { model: o.model, temperature: o.temperature ?? 0, signal: o.signal };
+    return this.stream(a, () => ({
+      model: a.model, temperature: a.temperature, messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      stream: true, stream_options: { include_usage: true }, cache_prompt: true, max_tokens: o.maxTokens ?? 1024,
+      chat_template_kwargs: { enable_thinking: false }, // los modelos que traen su propia plantilla lo reciben en `extra` y lo sustituye
+      ...(o.extra ?? {}),
+    }));
+  }
+
+  /** Petición en streaming al `llama-server` integrado (compartida por la llamada con JSON y la de texto plano). */
+  private async stream(a: ChatArgs, body: () => Record<string, unknown>): Promise<string> {
     const lease = await this.runtime.acquire(a.model, a.signal);
     const ctrl = new AbortController();
     const onAbort = () => ctrl.abort();
@@ -179,7 +225,7 @@ export class BuiltinClient extends OpenAICompatibleClient {
     try {
       arm();
       const res = await fetch(this.url('/chat/completions', lease.baseUrl), {
-        method: 'POST', headers: this.headers(lease.apiKey, lease.contentType), body: JSON.stringify(this.payload(messages, schema, a)), signal: ctrl.signal,
+        method: 'POST', headers: this.headers(lease.apiKey, lease.contentType), body: JSON.stringify(body()), signal: ctrl.signal,
       });
       if (!res.ok) throw new LLMUnavailableError(`El motor de lenguaje devolvió un error: ${await safeError(res)}`);
       const reader = res.body!.getReader();
@@ -219,6 +265,16 @@ export class BuiltinClient extends OpenAICompatibleClient {
     this.lastStats = { tokens, seconds: Math.round(seconds * 100) / 100, tps: tokens ? Math.round((tokens / seconds) * 10) / 10 : 0 };
     return parts.join('');
   }
+}
+
+/** Opciones de PLaMo como mensaje de sistema «[plamo-translate]» (formato documentado en su ficha) cuando no se pueden pasar como plantilla. */
+export function plamoSystemMessage(extra: Record<string, unknown> | undefined): ChatMessage | null {
+  const kw = (extra?.chat_template_kwargs ?? {}) as { target_lang?: string; source_lang?: string; glossary?: { source: string; target: string }[] };
+  if (!kw.target_lang) return null;
+  const lines = ['[plamo-translate]', `target_lang=${kw.target_lang}`];
+  if (kw.source_lang) lines.push(`source_lang=${kw.source_lang}`);
+  for (const g of kw.glossary ?? []) lines.push(`glossary=${g.source} => ${g.target}`);
+  return { role: 'system', content: lines.join('\n') };
 }
 
 async function safeError(res: Response): Promise<string> {

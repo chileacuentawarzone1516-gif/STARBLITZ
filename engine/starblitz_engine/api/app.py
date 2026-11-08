@@ -332,9 +332,9 @@ def create_app(svc: Services, ui_dir: Path | None = None) -> FastAPI:
             def make(mid: str):
                 cfg = svc.settings.value
                 client = create_client(cfg.llm, svc.runtime, svc.library)
-                from ..translate.contextual import ContextualTranslator
+                from ..translate.plain import make_translator
 
-                return ContextualTranslator(client, mid, cfg.translation.model_copy(update={"quality": "balanced"}))
+                return make_translator(client, mid, cfg.translation.model_copy(update={"quality": "balanced"}), svc.library)
             return benchmark.compare(body.ids, make, lambda p, m: ctx.update(p, message=m), ctx.cancel_event)
         return svc.jobs.submit("llm_compare", "Comparando modelos", run).public()
 
