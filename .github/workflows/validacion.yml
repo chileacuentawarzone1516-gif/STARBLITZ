@@ -1,0 +1,376 @@
+# Validación de STARBLITZ en un entorno limpio (repositorio PRIVADO, solo para compilar y validar).
+#
+# Cada trabajo declara en su nombre QUÉ tipo de evidencia produce. No se mezclan:
+#   COMPILACIÓN        el artefacto se genera y su contenido se inspecciona; NO prueba que funcione.
+#   PRUEBAS SIMULADAS  hay piezas falsas (modelo de lenguaje, Hugging Face, plugin nativo de Android).
+#   PRUEBAS REALES     modelos y servicios de verdad (Hugging Face, llama.cpp, OCR); páginas sintéticas.
+#   HARDWARE FÍSICO    no se puede hacer en CI: figura como PENDIENTE en docs/PRUEBAS-HARDWARE.md.
+name: validacion
+
+# Solo manual: no se ejecuta en cada push para no gastar minutos de CI ni producir artefactos sin que lo pidas.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validacion-${{ github.ref }}
+  cancel-in-progress: true
+
+# bash con «-eo pipefail»: así `prueba | tee registro` falla si la prueba falla (sin esto el registro ocultaría el error).
+defaults:
+  run:
+    shell: bash
+
+env:
+  LLAMA_TAG: b12017
+  DETECTOR_URL: https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/comictextdetector.pt.onnx
+  DETECTOR_SHA256: 1a86ace74961413cbd650002e7bb4dcec4980ffa21b2f19b86933372071d718f
+
+jobs:
+  # ───────────────────────────── PRUEBAS SIMULADAS ─────────────────────────────
+  simuladas:
+    name: "PRUEBAS SIMULADAS · unitarias e integración (sin modelos reales)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: '3.12' }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: '22', cache: npm }
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with: { distribution: temurin, java-version: '21' }
+      - name: OCR PP-OCR (se descarga de PyPI y se verifica su SHA-256; los pesos no están en el repositorio)
+        run: bash tools/prepare_ppocr.sh
+      - name: Dependencias del motor
+        run: |
+          pip install -r engine/requirements.txt onnxruntime pytest onnx
+          pip install --no-deps rapidocr==3.10.0
+      - name: Motor Python (modelo de lenguaje y Hugging Face simulados; sin detector real)
+        working-directory: engine
+        run: |
+          mkdir -p ../informe
+          python -m pytest -q -rs -p no:cacheprovider --junitxml=../informe/pytest-motor.xml 2>&1 | tee ../informe/pytest-motor.txt
+        env: { PYTHONUTF8: '1' }
+      - name: Interfaz compartida y móvil (tipos + vitest)
+        run: |
+          mkdir -p informe
+          npm ci
+          npm run typecheck 2>&1 | tee informe/tsc.txt
+          npm test 2>&1 | tee informe/vitest.txt
+      - name: Parte nativa de Android (JDK, sin Android; llama-server falso)
+        run: |
+          W=$(mktemp -d)
+          javac -d "$W" apps/mobile/android/app/src/main/java/app/starblitz/mobile/nativeio/*.java \
+            apps/mobile/android/app/src/test/java/app/starblitz/mobile/nativeio/NativeIoSelfTest.java
+          java -cp "$W" app.starblitz.mobile.nativeio.NativeIoSelfTest "$(command -v python)" engine/tests/fake_llama_server.py 2>&1 | tee informe/jvm-nativo.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with: { name: informe-simuladas, path: informe, retention-days: 14, if-no-files-found: warn }
+
+  # ───────────────────── PRUEBAS REALES (detector y OCR) · Python ─────────────────────
+  motor-detector-real:
+    name: "PRUEBAS REALES · motor Python con detector y OCR reales (LLM y HF simulados)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: '3.12' }
+      - name: Dependencias, fuente japonesa y detector (SHA-256 verificado)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
+          pip install -r engine/requirements.txt onnxruntime pytest onnx
+          pip install --no-deps rapidocr==3.10.0
+          mkdir -p ~/models
+          curl -fL --retry 4 -o ~/models/comictextdetector.pt.onnx "$DETECTOR_URL"
+          echo "$DETECTOR_SHA256  $HOME/models/comictextdetector.pt.onnx" | sha256sum -c -
+      - name: Página de prueba sintética (dibujada por apps/mobile/e2e/make_pages.py)
+        run: |
+          mkdir -p engine/tests/data informe
+          python apps/mobile/e2e/make_pages.py "$RUNNER_TEMP/paginas"
+          python -c "from PIL import Image; import os; Image.open(os.environ['RUNNER_TEMP']+'/paginas/pagina-01.png').convert('RGB').save('engine/tests/data/ja_page1.jpg', quality=92)"
+      - name: Pruebas completas del motor (incluye las que se omiten sin modelo)
+        working-directory: engine
+        env: { PYTHONUTF8: '1', STARBLITZ_TESTDATA: '${{ github.workspace }}/engine/tests/data' }
+        run: python -m pytest -v -rs --durations=10 -p no:cacheprovider --junitxml=../informe/pytest-motor-real.xml 2>&1 | tee ../informe/pytest-motor-real.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with: { name: informe-motor-detector-real, path: informe, retention-days: 14, if-no-files-found: warn }
+
+  # ───────────────────────────── E2E de la app móvil en Chromium ─────────────────────────────
+  movil-e2e-chromium:
+    name: "PRUEBAS REALES + SIMULADAS · app móvil en Chromium (visión real, LLM simulado)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: '22', cache: npm }
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: '3.12' }
+      - name: Dependencias (Chromium, fuente japonesa, Pillow, OCR PP-OCR)
+        run: |
+          bash tools/prepare_ppocr.sh
+          npm ci
+          npm install --no-save --no-audit --no-fund playwright@1.63.0
+          npx playwright install --with-deps chromium
+          sudo apt-get install -y -qq fonts-noto-cjk
+          pip install pillow
+      - name: E2E (detector y OCR reales en WebAssembly con hilos; modelo de lenguaje simulado)
+        run: bash apps/mobile/e2e/run.sh "$RUNNER_TEMP/e2e" 2>&1 | tee e2e-simulado.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: informe-movil-e2e-chromium
+          path: |
+            e2e-simulado.txt
+            ${{ runner.temp }}/e2e/shots
+            ${{ runner.temp }}/e2e/*.json
+            ${{ runner.temp }}/e2e/*.log
+            ${{ runner.temp }}/e2e/*.txt
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ───────────────────────────── COMPILACIÓN · APK arm64 ─────────────────────────────
+  apk:
+    name: "COMPILACIÓN · APK Android arm64 (+ verificación estática del contenido)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with: { distribution: temurin, java-version: '21' }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: '22', cache: npm }
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - name: Plataforma y herramientas de compilación de Android
+        run: sdkmanager --install "platforms;android-35" "build-tools;34.0.0" "build-tools;35.0.0" "platform-tools" > /dev/null
+      - name: OCR PP-OCR (PyPI + SHA-256) e integridad de las bibliotecas de llama.cpp arm64
+        run: |
+          bash tools/prepare_ppocr.sh
+          cd apps/mobile/android/app/src/main/jniLibs/arm64-v8a
+          sha256sum -c "$GITHUB_WORKSPACE/apps/mobile/android/app/vendor/llama-libs.sha256"
+          file libllama-server-exe.so | tee -a "$GITHUB_STEP_SUMMARY"
+      - run: npm ci
+      - name: Interfaz web de producción + sincronización con Capacitor
+        working-directory: apps/mobile
+        run: |
+          npm run build
+          npx cap sync android
+      - name: Clave de firma DESECHABLE de CI (la tuya se crea al compilar en tu PC con el .bat)
+        run: |
+          PW=$(openssl rand -hex 16)
+          keytool -genkeypair -keystore "$RUNNER_TEMP/ci.jks" -alias starblitz -keyalg RSA -keysize 3072 -validity 3650 \
+            -storepass "$PW" -keypass "$PW" -dname "CN=STARBLITZ CI (desechable), O=STARBLITZ, C=DO"
+          echo "SB_KEYSTORE=$RUNNER_TEMP/ci.jks" >> "$GITHUB_ENV"
+          echo "::add-mask::$PW"
+          echo "SB_KEYSTORE_PASSWORD=$PW" >> "$GITHUB_ENV"
+      - name: Compilar APK (release, firmado)
+        working-directory: apps/mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleRelease 2>&1 | tee "$GITHUB_WORKSPACE/gradle.log"
+          mkdir -p "$GITHUB_WORKSPACE/salida"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/salida/STARBLITZ-android-arm64-CI.apk"
+      - name: Verificación estática del APK
+        run: bash scripts/ci/verificar-apk.sh salida/STARBLITZ-android-arm64-CI.apk informe-apk
+      - name: Resumen
+        if: always()
+        run: |
+          [ -f informe-apk/apk-verificacion.md ] && cat informe-apk/apk-verificacion.md >> "$GITHUB_STEP_SUMMARY"
+          [ -f salida/STARBLITZ-android-arm64-CI.apk ] && sha256sum salida/STARBLITZ-android-arm64-CI.apk | tee salida/STARBLITZ-android-arm64-CI.apk.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: STARBLITZ-Android-APK
+          path: |
+            salida
+            informe-apk
+            gradle.log
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: warn
+
+  # ───────────── COMPILACIÓN · el .bat de MASM, tal cual, en un Windows limpio ─────────────
+  windows-apk-bat:
+    name: "COMPILACIÓN · Compilar-APK-Android.bat en un Windows limpio (JDK y SDK que descarga el propio script)"
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      STARBLITZ_NO_PAUSE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: '22' }
+      - name: Sintaxis de los scripts .ps1 con Windows PowerShell 5.1 (el que usa el .bat)
+        shell: powershell
+        run: |
+          $bad = 0
+          Get-ChildItem scripts -Recurse -Filter *.ps1 | ForEach-Object {
+            $errs = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errs)
+            if ($errs) { $bad++; $errs | ForEach-Object { Write-Host ("ERROR {0}:{1} {2}" -f $_.Extent.File, $_.Extent.StartLineNumber, $_.Message) } }
+            else { Write-Host ("OK    " + $_.Name) }
+          }
+          exit $bad
+      - name: Comprobación previa (-Preflight)
+        shell: cmd
+        run: call scripts\Compilar-APK-Android.bat -Preflight
+      - name: Compilar-APK-Android.bat (descarga JDK 21 y SDK de Android, compila, firma y verifica)
+        shell: cmd
+        run: call scripts\Compilar-APK-Android.bat
+      - name: Resumen
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path dist/STARBLITZ-android.apk) { "APK: " + ('{0:N1} MB' -f ((Get-Item dist/STARBLITZ-android.apk).Length / 1MB)) + " · " + (Get-Content dist/STARBLITZ-android.apk.sha256) | Tee-Object -Append $env:GITHUB_STEP_SUMMARY }
+          Get-ChildItem .cache/android/logs -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object { "registro: " + $_.Name + " (" + $_.Length + " bytes)" }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: STARBLITZ-Android-APK-desde-bat
+          path: |
+            dist/STARBLITZ-android.apk
+            dist/STARBLITZ-android.apk.sha256
+            .cache/android/logs/*.log
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: warn
+
+  # ───────────────────── PRUEBA EN EMULADOR (no es un teléfono físico) ─────────────────────
+  emulador:
+    name: "PRUEBA EN EMULADOR · humo del APK en Android (mejor esfuerzo; no es hardware físico)"
+    needs: apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with: { name: STARBLITZ-Android-APK, path: descarga }
+      - name: Activar KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          script: bash scripts/ci/emulador-humo.sh descarga/salida/STARBLITZ-android-arm64-CI.apk informe-emulador
+      - name: Resumen
+        if: always()
+        run: '[ -f informe-emulador/emulador.md ] && cat informe-emulador/emulador.md >> "$GITHUB_STEP_SUMMARY" || true'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with: { name: informe-emulador, path: informe-emulador, retention-days: 14, if-no-files-found: warn }
+
+  # ───────────── INSTALADOR CANÓNICO DE WINDOWS · compilación + prueba real (el mismo flujo que la Release) ─────────────
+  windows:
+    name: "Instalador de Windows (NSIS directo): compilar y probar"
+    uses: ./.github/workflows/windows.yml
+
+  # ───────────────────────────── PRUEBAS REALES con modelos de verdad ─────────────────────────────
+  modelos-reales:
+    name: "PRUEBAS REALES · Hugging Face, llama.cpp, Manga OCR, LaMa y traducción ja→es / en→es"
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: '3.12' }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: '22', cache: npm }
+      - name: Dependencias del motor y fuentes
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
+          pip install -r engine/requirements.txt onnxruntime pytest onnx
+          pip install --no-deps rapidocr==3.10.0
+      - name: llama.cpp ${{ env.LLAMA_TAG }} para Linux x64 (servidor oficial; se ejecuta en CPU)
+        run: |
+          mkdir -p "$RUNNER_TEMP/llama"
+          curl -fL --retry 4 -o "$RUNNER_TEMP/llama.tgz" "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-ubuntu-x64.tar.gz"
+          sha256sum "$RUNNER_TEMP/llama.tgz"
+          tar -xzf "$RUNNER_TEMP/llama.tgz" -C "$RUNNER_TEMP/llama" --strip-components=1
+          LS="$(find "$RUNNER_TEMP/llama" -name llama-server -type f | head -1)"
+          echo "STARBLITZ_LLAMA_SERVER=$LS" >> "$GITHUB_ENV"
+          "$LS" --version 2>&1 | head -3
+      - name: Pruebas reales del motor (catálogo vs HF, Manga OCR, LaMa, modelo GGUF, traducción, proyecto completo)
+        env: { PYTHONUTF8: '1' }
+        run: python tools/probar_real.py --out informe-real --data-dir "$RUNNER_TEMP/datos-motor" --todo --timeout-min 150 2>&1 | tee informe-real-consola.txt
+      - name: E2E de la app móvil con el modelo de lenguaje REAL (llama-server real; visión real en WebAssembly)
+        if: always()
+        run: |
+          GGUF="$(find "$RUNNER_TEMP/datos-motor" -name '*.gguf' ! -name 'mmproj*' | head -1)"
+          [ -n "$GGUF" ] || { echo "No hay GGUF instalado (falló la fase anterior)"; exit 1; }
+          nohup "$STARBLITZ_LLAMA_SERVER" -m "$GGUF" --host 127.0.0.1 --port 8081 -c 8192 --parallel 1 --jinja --reasoning-budget 0 > llama-e2e.log 2>&1 &
+          for _ in $(seq 1 120); do curl -sf http://127.0.0.1:8081/health >/dev/null && break; sleep 2; done
+          curl -s http://127.0.0.1:8081/health; echo
+          bash tools/prepare_ppocr.sh
+          npm ci
+          npm install --no-save --no-audit --no-fund playwright@1.63.0
+          npx playwright install --with-deps chromium
+          pip install pillow
+          E2E_REAL_LLM_URL=http://127.0.0.1:8081/v1 bash apps/mobile/e2e/run.sh "$RUNNER_TEMP/e2e-real" 2>&1 | tee e2e-llm-real.txt
+      - name: Resumen
+        if: always()
+        run: |
+          [ -f informe-real/informe.md ] && cat informe-real/informe.md >> "$GITHUB_STEP_SUMMARY"
+          [ -f "$RUNNER_TEMP/e2e-real/e2e-traducciones-reales.json" ] && { echo; echo '## E2E móvil con modelo REAL: traducciones'; echo '```json'; cat "$RUNNER_TEMP/e2e-real/e2e-traducciones-reales.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: informe-modelos-reales
+          path: |
+            informe-real
+            informe-real-consola.txt
+            e2e-llm-real.txt
+            llama-e2e.log
+            ${{ runner.temp }}/e2e-real/shots
+            ${{ runner.temp }}/e2e-real/*.json
+            ${{ runner.temp }}/e2e-real/*.log
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ───────────────────────────── INFORME FINAL ─────────────────────────────
+  informe:
+    name: "INFORME · confirmado / pendiente / no verificado"
+    if: always()
+    needs: [simuladas, motor-detector-real, movil-e2e-chromium, apk, windows-apk-bat, emulador, windows, modelos-reales]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - name: Redactar INFORME.md
+        run: |
+          r() { case "$1" in success) echo "CONFIRMADO";; failure) echo "FALLÓ";; cancelled) echo "CANCELADO";; skipped) echo "OMITIDO";; *) echo "$1";; esac; }
+          {
+            echo "# STARBLITZ — informe de validación en CI"; echo
+            echo "Commit \`${GITHUB_SHA::10}\` · ejecución $GITHUB_RUN_ID · $(date -u +'%Y-%m-%d %H:%M UTC')"; echo
+            echo "| Evidencia | Qué prueba | Resultado |"; echo "|---|---|---|"
+            echo "| COMPILACIÓN | APK arm64 generado y firmado; contenido y permisos inspeccionados (estático) | $(r '${{ needs.apk.result }}') |"
+            echo "| COMPILACIÓN | \`Compilar-APK-Android.bat\` en un Windows limpio: descarga JDK/SDK, compila, firma y verifica el APK | $(r '${{ needs.windows-apk-bat.result }}') |"
+            echo "| COMPILACIÓN + REAL | Instalador canónico de Windows (NSIS directo): generado, contenido del motor comprobado y probado en Windows real (instalar, motor embebido, abrir app, desinstalar) | $(r '${{ needs.windows.result }}') |"
+            echo "| SIMULADA | Pruebas unitarias/integración (motor, interfaz, móvil, parte nativa JVM) | $(r '${{ needs.simuladas.result }}') |"
+            echo "| REAL (parcial) | Motor Python con detector y OCR reales sobre páginas sintéticas (LLM y HF simulados) | $(r '${{ needs.motor-detector-real.result }}') |"
+            echo "| REAL (parcial) | App móvil en Chromium: visión real en WebAssembly, LLM simulado | $(r '${{ needs.movil-e2e-chromium.result }}') |"
+            echo "| REAL | Hugging Face real, modelos GGUF/Manga OCR/LaMa reales, traducción ja→es y en→es, proyecto completo, E2E móvil con LLM real | $(r '${{ needs.modelos-reales.result }}') |"
+            echo "| EMULADOR (mejor esfuerzo) | Humo del APK en emulador Android x86_64 (no es teléfono físico) | $(r '${{ needs.emulador.result }}') |"
+            echo; echo "## PENDIENTE: requiere hardware físico (ver docs/PRUEBAS-HARDWARE.md)"; echo
+            sed -n '/^## Lista de pruebas/,$p' docs/PRUEBAS-HARDWARE.md
+          } > INFORME.md
+          cat INFORME.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with: { name: INFORME, path: INFORME.md, retention-days: 30 }

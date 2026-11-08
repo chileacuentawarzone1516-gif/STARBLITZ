@@ -1,0 +1,92 @@
+# Integración continua de STARBLITZ: integridad del repositorio, tipos, pruebas y E2E.
+# Solo lectura: no publica nada ni escribe en el repositorio.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  DETECTOR_URL: https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/comictextdetector.pt.onnx
+  DETECTOR_SHA256: 1a86ace74961413cbd650002e7bb4dcec4980ffa21b2f19b86933372071d718f
+
+jobs:
+  integridad:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - name: Integridad del repositorio (rutas prohibidas, tamaños, finales de línea, secretos, permisos de workflows)
+        run: bash scripts/ci/verificar-repo.sh
+
+  test:
+    needs: integridad
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: '3.12' }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: '22', cache: npm }
+      - name: Dependencias del motor
+        run: |
+          pip install -r engine/requirements.txt onnxruntime pytest onnx
+          pip install --no-deps rapidocr==3.10.0
+      - name: Modelo del detector (para la prueba de extremo a extremo; SHA-256 verificado)
+        run: |
+          mkdir -p ~/models
+          curl -fL --retry 4 -o ~/models/comictextdetector.pt.onnx "$DETECTOR_URL"
+          echo "$DETECTOR_SHA256  $HOME/models/comictextdetector.pt.onnx" | sha256sum -c -
+      - name: Pruebas del motor
+        working-directory: engine
+        run: python -m pytest -q
+      - name: Pruebas y tipos de la interfaz (compartido + móvil)
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: Pruebas de la parte nativa de Android (JDK, sin Android)
+        run: |
+          W=$(mktemp -d)
+          javac -d "$W" apps/mobile/android/app/src/main/java/app/starblitz/mobile/nativeio/*.java \
+            apps/mobile/android/app/src/test/java/app/starblitz/mobile/nativeio/NativeIoSelfTest.java
+          java -cp "$W" app.starblitz.mobile.nativeio.NativeIoSelfTest "$(command -v python)" engine/tests/fake_llama_server.py
+
+  mobile-e2e:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: '22', cache: npm }
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: '3.12' }
+      - name: Dependencias (OCR PP-OCR, Chromium, fuente japonesa, Pillow)
+        run: |
+          bash tools/prepare_ppocr.sh
+          npm ci
+          npm install --no-save --no-audit --no-fund playwright@1.63.0
+          npx playwright install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk
+          pip install pillow
+      - name: E2E de la app móvil en Chromium (detector y OCR reales; modelo de lenguaje simulado)
+        run: bash apps/mobile/e2e/run.sh

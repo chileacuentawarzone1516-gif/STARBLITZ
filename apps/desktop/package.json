@@ -1,0 +1,61 @@
+{
+  "name": "@starblitz/desktop",
+  "productName": "STARBLITZ",
+  "version": "1.0.0",
+  "private": true,
+  "description": "STARBLITZ Desktop — traductor de mangas y cómics",
+  "author": "MASM",
+  "main": "dist-electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build:ui": "vite build",
+    "build:electron": "node electron/build.mjs",
+    "build": "npm run typecheck && npm run build:ui && npm run build:electron",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dist:win": "npm run build && electron-builder --win --x64"
+  },
+  "dependencies": {
+    "@starblitz/shared": "1.0.0",
+    "lucide-react": "0.468.0",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "zustand": "5.0.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "19.1.13",
+    "@types/react-dom": "19.1.9",
+    "@vitejs/plugin-react": "4.7.0",
+    "electron": "38.2.0",
+    "electron-builder": "26.0.12",
+    "esbuild": "0.25.10",
+    "typescript": "5.9.3",
+    "vite": "6.3.6"
+  },
+  "build": {
+    "appId": "app.starblitz.desktop",
+    "productName": "STARBLITZ",
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "../../brand/starblitz.ico",
+      "artifactName": "STARBLITZ-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "STARBLITZ",
+      "installerIcon": "../../brand/starblitz.ico",
+      "uninstallerIcon": "../../brand/starblitz.ico",
+      "deleteAppDataOnUninstall": false,
+      "language": "3082"
+    }
+  }
+}

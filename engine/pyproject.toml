@@ -1,0 +1,37 @@
+[project]
+name = "starblitz-engine"
+version = "1.0.0"
+description = "Motor local de traducción contextual y reconstrucción de mangas y cómics"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "python-multipart>=0.0.9",
+  "pydantic>=2.7",
+  "httpx>=0.27",
+  "numpy>=1.26",
+  "opencv-python-headless>=4.9",
+  "pillow>=10.3",
+  "pypdfium2>=5.0",
+  "psutil>=5.9",
+  "rapidocr>=3.10",
+  "onnxruntime>=1.20; sys_platform != 'win32'",
+  "onnxruntime-directml>=1.20; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "onnx>=1.16"]
+
+[project.scripts]
+starblitz-engine = "starblitz_engine.__main__:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["starblitz_engine*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,78 @@
+# STARBLITZ — lista blanca: todo lo de la raíz se ignora salvo lo declarado aquí.
+/*
+!/.github/
+!/apps/
+!/assets/
+!/brand/
+!/docs/
+!/engine/
+!/scripts/
+!/tools/
+!/.gitattributes
+!/.gitignore
+!/.editorconfig
+!/README.md
+!/CHANGELOG.md
+!/CONTRIBUTING.md
+!/SECURITY.md
+!/LICENSE
+!/package.json
+!/package-lock.json
+!/tsconfig.base.json
+
+# Vault de Obsidian y material interno (defensa en profundidad)
+/STARBLITZ OBISIDIAN/
+/STARBLITZ OBSIDIAN/
+.obsidian/
+
+# Secretos y configuración local
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+local.properties
+CLAUDE.local.md
+.claude/
+
+# Compilación, dependencias y cachés
+node_modules/
+.venv/
+.cache/
+dist/
+dist-electron/
+dist-e2e/
+build/
+out/
+release/
+data/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.gradle/
+capacitor-cordova-android-plugins/
+
+# Binarios, modelos y paquetes (van a Releases o los descarga el usuario)
+*.apk
+*.aab
+*.exe
+*.zip
+*.tar.gz
+*.tgz
+*.gguf
+*.part.*
+*.log
+.DS_Store
+
+# Regenerables con scripts pinados por SHA-256
+apps/mobile/public/models/ppocr-rec.onnx
+engine/tests/data/
+apps/mobile/android/app/src/main/assets/public/
+apps/mobile/android/app/src/main/assets/capacitor.config.json
+apps/mobile/android/app/src/main/assets/capacitor.plugins.json
+apps/mobile/android/app/src/main/res/xml/config.xml

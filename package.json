@@ -1,0 +1,23 @@
+{
+  "name": "starblitz",
+  "private": true,
+  "version": "1.0.0",
+  "description": "STARBLITZ — traducción contextual y reconstrucción de mangas y cómics",
+  "license": "MIT",
+  "workspaces": [
+    "apps/shared",
+    "apps/desktop",
+    "apps/mobile"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck -w @starblitz/shared && npm run typecheck -w @starblitz/desktop && npm run typecheck -w @starblitz/mobile",
+    "test": "npm test -w @starblitz/shared && npm test -w @starblitz/mobile",
+    "build:desktop": "npm run build -w @starblitz/desktop",
+    "build:mobile": "npm run build -w @starblitz/mobile",
+    "e2e:mobile": "npm run e2e -w @starblitz/mobile"
+  },
+  "devDependencies": {
+    "pe-library": "^1.0.1",
+    "resedit": "^2.0.3"
+  }
+}

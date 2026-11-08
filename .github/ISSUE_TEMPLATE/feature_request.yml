@@ -1,0 +1,25 @@
+name: Mejora
+description: Propón una mejora o una función nueva
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problema
+    attributes:
+      label: Problema que resuelve
+    validations:
+      required: true
+  - type: textarea
+    id: propuesta
+    attributes:
+      label: Propuesta
+    validations:
+      required: true
+  - type: textarea
+    id: alternativas
+    attributes:
+      label: Alternativas consideradas
+  - type: dropdown
+    id: producto
+    attributes:
+      label: Producto afectado
+      options: [Desktop (Windows), Mobile (Android), Motor Python, Documentación, Varios]

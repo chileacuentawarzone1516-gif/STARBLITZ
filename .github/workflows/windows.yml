@@ -1,0 +1,91 @@
+# Instalador canónico de Windows: NSIS directo (scripts/build-installer.sh + scripts/nsis/installer.nsi).
+# Un único proceso para build.yml, validacion.yml y release.yml: se compila UNA vez y el mismo .exe que se prueba
+# (descargado como artefacto y comprobado por SHA-256) es el que se publica. Solo lectura: no publica nada.
+name: windows
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  compilar:
+    name: "COMPILACIÓN · instalador de Windows (NSIS) y aplicación portátil"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: '22', cache: npm }
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: '3.12' }
+      - run: npm ci
+      - name: Aplicación portátil (Electron + Python embebido + llama.cpp Vulkan; descargas verificadas)
+        run: PIP="python -m pip" bash scripts/build-windows.sh
+      - name: Comprobar el contenido (motor Python, dependencias y recursos) antes de empaquetar
+        run: |
+          D=dist/STARBLITZ-win-x64
+          for f in STARBLITZ.exe resources/app/dist-electron/main.cjs resources/ui/index.html resources/llama/llama-server.exe \
+                   resources/engine/python/python.exe resources/engine/app/starblitz_engine/__main__.py; do
+            [ -s "$D/$f" ] || { echo "::error::Falta $f en la aplicación portátil."; exit 1; }
+          done
+          S="$D/resources/engine/python/Lib/site-packages"
+          for p in fastapi uvicorn pydantic httpx numpy cv2 PIL pypdfium2 psutil rapidocr onnxruntime shapely pyclipper; do
+            [ -d "$S/$p" ] || { echo "::error::Falta la dependencia del motor: $p"; exit 1; }
+          done
+          echo "Contenido del motor y de los recursos: OK"
+      - name: Instalador NSIS (el canónico)
+        run: bash scripts/build-installer.sh
+      - name: ZIP portátil, huellas y comprobación de archivos obligatorios
+        run: |
+          mkdir -p salida
+          cp dist/STARBLITZ-Setup-*.exe salida/
+          [ "$(ls salida/STARBLITZ-Setup-*.exe | wc -l)" = 1 ] || { echo "::error::Se esperaba exactamente un instalador."; exit 1; }
+          echo "Modo portátil: los datos se guardan en la carpeta data junto al ejecutable." > dist/STARBLITZ-win-x64/portable.txt
+          (cd dist && zip -qr -9 ../salida/STARBLITZ-win-x64-portable.zip STARBLITZ-win-x64)
+          ( cd salida && sha256sum STARBLITZ-Setup-*.exe | tee STARBLITZ-Setup.sha256 )
+          for f in salida/STARBLITZ-Setup-*.exe salida/STARBLITZ-win-x64-portable.zip salida/STARBLITZ-Setup.sha256; do
+            [ -s "$f" ] || { echo "::error::Falta $f."; exit 1; }
+          done
+          du -sh dist/STARBLITZ-win-x64 salida/* | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: STARBLITZ-Windows
+          path: salida
+          retention-days: 30
+          compression-level: 0
+          if-no-files-found: error
+
+  probar-instalador:
+    name: "PRUEBAS REALES · instalar, arrancar el motor, abrir la app y desinstalar en Windows"
+    needs: compilar
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with: { name: STARBLITZ-Windows, path: instalador }
+      - name: Probar el MISMO instalador que se publicará (SHA-256 verificado contra la compilación)
+        shell: pwsh
+        run: |
+          $exes = @(Get-ChildItem instalador -Filter 'STARBLITZ-Setup-*.exe')
+          if ($exes.Count -ne 1) { throw "Se esperaba exactamente un instalador y hay $($exes.Count)." }
+          $esperado = ((Get-Content instalador/STARBLITZ-Setup.sha256 -Raw).Trim() -split '\s+')[0].ToLower()
+          $real = (Get-FileHash $exes[0].FullName -Algorithm SHA256).Hash.ToLower()
+          if ($real -ne $esperado) { throw "El SHA-256 del instalador descargado ($real) no coincide con el de la compilación ($esperado)." }
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ci/probar-instalador.ps1 -Installer $exes[0].FullName -Out informe-windows
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with: { name: informe-windows-instalador, path: informe-windows, retention-days: 14, if-no-files-found: warn }
+      - name: Resumen
+        if: always()
+        run: '[ -f informe-windows/windows-instalador.md ] && cat informe-windows/windows-instalador.md >> "$GITHUB_STEP_SUMMARY" || true'

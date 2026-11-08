@@ -1,0 +1,250 @@
+{
+ "models": [
+  {
+   "id": "qwen3.5-2b-q4km",
+   "label": "Qwen 3.5 2B",
+   "family": "qwen3.5",
+   "params_b": 2.0,
+   "active_b": 2.0,
+   "repo": "unsloth/Qwen3.5-2B-GGUF",
+   "file": "Qwen3.5-2B-Q4_K_M.gguf",
+   "size": 1280835840,
+   "mmproj": "mmproj-F16.gguf",
+   "mmproj_size": 668227264,
+   "quant": "Q4_K_M",
+   "license": "Apache-2.0",
+   "context_native": 262144,
+   "tiers": [
+    "low"
+   ],
+   "summary": "El más ligero que recomendamos: para móviles de gama baja y equipos sin GPU. Un modelo de 2 000 M de parámetros es limitado en diálogos largos o con mucho argot; conviene revisar más líneas.",
+   "languages": "201 idiomas, incluidos japonés, inglés y español",
+   "tags": [
+    "ligero",
+    "móvil"
+   ],
+   "arch": "qwen35"
+  },
+  {
+   "id": "qwen3.5-4b-q4km",
+   "label": "Qwen 3.5 4B",
+   "family": "qwen3.5",
+   "params_b": 4.0,
+   "active_b": 4.0,
+   "repo": "unsloth/Qwen3.5-4B-GGUF",
+   "file": "Qwen3.5-4B-Q4_K_M.gguf",
+   "size": 2740937888,
+   "mmproj": "mmproj-F16.gguf",
+   "mmproj_size": 672423616,
+   "quant": "Q4_K_M",
+   "license": "Apache-2.0",
+   "context_native": 262144,
+   "tiers": [
+    "mid"
+   ],
+   "summary": "Punto de equilibrio para móviles de gama media y portátiles modestos. Familia con especial énfasis en japonés, chino y coreano; cabe en un teléfono de 6 GB de RAM.",
+   "languages": "201 idiomas, incluidos japonés, inglés y español",
+   "tags": [
+    "equilibrado",
+    "móvil"
+   ],
+   "arch": "qwen35"
+  },
+  {
+   "id": "qwen3.5-4b-q5km",
+   "label": "Qwen 3.5 4B (Q5, más precisión)",
+   "family": "qwen3.5",
+   "params_b": 4.0,
+   "active_b": 4.0,
+   "repo": "unsloth/Qwen3.5-4B-GGUF",
+   "file": "Qwen3.5-4B-Q5_K_M.gguf",
+   "size": 3143656608,
+   "mmproj": "mmproj-F16.gguf",
+   "mmproj_size": 672423616,
+   "quant": "Q5_K_M",
+   "license": "Apache-2.0",
+   "context_native": 262144,
+   "tiers": [],
+   "summary": "Misma base que el 4B con cuantización Q5: un 15 % más grande y algo más fiel.",
+   "languages": "201 idiomas, incluidos japonés, inglés y español",
+   "tags": [
+    "precisión"
+   ],
+   "arch": "qwen35"
+  },
+  {
+   "id": "gemma4-e2b-qat",
+   "label": "Gemma 4 E2B (QAT 4 bits)",
+   "family": "gemma4",
+   "params_b": 5.1,
+   "active_b": 2.3,
+   "repo": "google/gemma-4-E2B-it-qat-q4_0-gguf",
+   "file": "gemma-4-E2B_q4_0-it.gguf",
+   "size": 3349516256,
+   "mmproj": "gemma-4-E2B-it-mmproj.gguf",
+   "mmproj_size": 986833664,
+   "quant": "Q4_0 (QAT)",
+   "license": "Apache-2.0",
+   "context_native": 131072,
+   "tiers": [],
+   "summary": "Modelo compacto de Google entrenado ya para 4 bits (QAT), que conserva más calidad que una cuantización posterior. Ocupa más disco que su tamaño efectivo por sus tablas de embeddings.",
+   "languages": "Multilingüe (incluye japonés, inglés y español)",
+   "tags": [
+    "ligero",
+    "móvil",
+    "oficial"
+   ],
+   "arch": "gemma4"
+  },
+  {
+   "id": "gemma4-e4b-qat",
+   "label": "Gemma 4 E4B (QAT 4 bits)",
+   "family": "gemma4",
+   "params_b": 7.5,
+   "active_b": 4.5,
+   "repo": "google/gemma-4-E4B-it-qat-q4_0-gguf",
+   "file": "gemma-4-E4B_q4_0-it.gguf",
+   "size": 5154941280,
+   "mmproj": "gemma-4-E4B-it-mmproj.gguf",
+   "mmproj_size": 991552256,
+   "quant": "Q4_0 (QAT)",
+   "license": "Apache-2.0",
+   "context_native": 131072,
+   "tiers": [],
+   "summary": "Alternativa de Google a Qwen 4B (QAT de 4 bits). Más pesada en disco; compárala con Qwen 4B en tu propio material con «Comparar modelos».",
+   "languages": "Multilingüe (incluye japonés, inglés y español)",
+   "tags": [
+    "oficial"
+   ],
+   "arch": "gemma4"
+  },
+  {
+   "id": "qwen3.5-9b-q4km",
+   "label": "Qwen 3.5 9B",
+   "family": "qwen3.5",
+   "params_b": 9.0,
+   "active_b": 9.0,
+   "repo": "unsloth/Qwen3.5-9B-GGUF",
+   "file": "Qwen3.5-9B-Q4_K_M.gguf",
+   "size": 5680522464,
+   "mmproj": "mmproj-F16.gguf",
+   "mmproj_size": 918166080,
+   "quant": "Q4_K_M",
+   "license": "Apache-2.0",
+   "context_native": 262144,
+   "tiers": [
+    "high",
+    "pc-gpu"
+   ],
+   "summary": "Recomendado para PC con GPU de 6–8 GB y móviles de gama alta (10 GB de RAM o más): el mayor modelo denso que cabe cómodamente en esa memoria. Familia con especial énfasis en japonés, chino y coreano.",
+   "languages": "201 idiomas, incluidos japonés, inglés y español",
+   "tags": [
+    "recomendado"
+   ],
+   "arch": "qwen35"
+  },
+  {
+   "id": "gemma4-12b-qat",
+   "label": "Gemma 4 12B (QAT 4 bits)",
+   "family": "gemma4",
+   "params_b": 12.0,
+   "active_b": 12.0,
+   "repo": "google/gemma-4-12B-it-qat-q4_0-gguf",
+   "file": "gemma-4-12b-it-qat-q4_0.gguf",
+   "size": 6975879296,
+   "mmproj": "mmproj-gemma-4-12b-it-qat-q4_0.gguf",
+   "mmproj_size": 175115616,
+   "quant": "Q4_0 (QAT)",
+   "license": "Apache-2.0",
+   "context_native": 131072,
+   "tiers": [
+    "pc-gpu"
+   ],
+   "summary": "Modelo de Google (QAT de 4 bits) para PC con 10 GB de VRAM o más. Compáralo con Qwen 9B en tu propio material con «Comparar modelos».",
+   "languages": "Multilingüe (incluye japonés, inglés y español)",
+   "tags": [
+    "calidad",
+    "oficial"
+   ],
+   "arch": "gemma4"
+  },
+  {
+   "id": "gemma4-26b-a4b-qat",
+   "label": "Gemma 4 26B‑A4B (MoE, QAT 4 bits)",
+   "family": "gemma4",
+   "params_b": 26.0,
+   "active_b": 4.0,
+   "repo": "google/gemma-4-26B-A4B-it-qat-q4_0-gguf",
+   "file": "gemma-4-26B_q4_0-it.gguf",
+   "size": 14439363584,
+   "mmproj": "gemma-4-26B-it-mmproj.gguf",
+   "mmproj_size": 1194828160,
+   "quant": "Q4_0 (QAT)",
+   "license": "Apache-2.0",
+   "context_native": 262144,
+   "tiers": [
+    "pc-gpu"
+   ],
+   "summary": "El modelo más grande del catálogo. Mezcla de expertos: solo 4 000 M de parámetros activos por token, así que es ágil para su tamaño, pero ocupa ~14 GB (necesita ~16 GB de VRAM, o GPU parcial con 32 GB de RAM).",
+   "languages": "Multilingüe (incluye japonés, inglés y español)",
+   "tags": [
+    "máxima calidad",
+    "oficial"
+   ],
+   "arch": "gemma4"
+  }
+ ],
+ "profiles": {
+  "low": {
+   "id": "low",
+   "label": "Gama baja",
+   "description": "Móvil con ≤ 5 GB de RAM o PC sin GPU y con poca memoria. Una sola pasada de traducción y OCR ligero.",
+   "context": 4096,
+   "vision_llm": false,
+   "quality": "balanced",
+   "ocr_japanese": "ppocr",
+   "inpaint": "fast",
+   "default_model": "qwen3.5-2b-q4km"
+  },
+  "mid": {
+   "id": "mid",
+   "label": "Gama media",
+   "description": "Móvil con 6–8 GB de RAM o portátil sin GPU dedicada.",
+   "context": 6144,
+   "vision_llm": false,
+   "quality": "balanced",
+   "ocr_japanese": "manga-ocr",
+   "inpaint": "fast",
+   "default_model": "qwen3.5-4b-q4km"
+  },
+  "high": {
+   "id": "high",
+   "label": "Gama alta",
+   "description": "Móvil con 10 GB de RAM o más, o PC con mucha RAM sin GPU dedicada.",
+   "context": 8192,
+   "vision_llm": false,
+   "quality": "max",
+   "ocr_japanese": "manga-ocr",
+   "inpaint": "fast",
+   "default_model": "qwen3.5-9b-q4km"
+  },
+  "pc-gpu": {
+   "id": "pc-gpu",
+   "label": "PC con GPU dedicada",
+   "description": "Equipo con tarjeta gráfica de 6 GB de VRAM o más.",
+   "context": 12288,
+   "vision_llm": true,
+   "quality": "max",
+   "ocr_japanese": "manga-ocr",
+   "inpaint": "lama",
+   "default_model": "qwen3.5-9b-q4km"
+  }
+ },
+ "arch_kv_factor": {
+  "qwen35": 0.3,
+  "qwen3": 1.0,
+  "gemma4": 0.4,
+  "gemma3": 0.4,
+  "llama": 1.0
+ }
+}

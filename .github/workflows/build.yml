@@ -1,0 +1,83 @@
+# Compilación de los binarios de STARBLITZ (instalador y portátil de Windows, APK de Android).
+# Solo lectura: sube artefactos al propio workflow; no publica nada. La publicación (en borrador) vive en release.yml.
+# Windows: reutiliza windows.yml (NSIS directo, el mismo que prueba validacion.yml y publica release.yml).
+# Se lanza a mano (workflow_dispatch) o desde release.yml. Las pruebas están en ci.yml y la validación en validacion.yml.
+name: build
+
+on:
+  workflow_dispatch:
+    inputs:
+      require-signing:
+        description: 'Exigir APK firmado con la clave de producción (falla si faltan los secretos)'
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      require-signing:
+        type: boolean
+        default: false
+    secrets:
+      ANDROID_KEYSTORE_B64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  windows:
+    uses: ./.github/workflows/windows.yml
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with: { distribution: temurin, java-version: '21' }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: '22', cache: npm }
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - run: bash tools/prepare_ppocr.sh
+      - run: npm ci
+      - name: Web + sincronización Capacitor
+        working-directory: apps/mobile
+        run: npm run build && npx cap sync android
+      - name: Firma (si hay secretos configurados)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          REQUIRE_SIGNING: ${{ inputs.require-signing }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/starblitz.jks"
+            echo "SB_KEYSTORE=$RUNNER_TEMP/starblitz.jks" >> "$GITHUB_ENV"
+          elif [ "$REQUIRE_SIGNING" = "true" ]; then
+            echo "::error::Se exige APK firmado y falta el secreto ANDROID_KEYSTORE_B64."; exit 1
+          fi
+      - name: Compilar APK
+        working-directory: apps/mobile/android
+        env:
+          SB_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          if [ -n "${SB_KEYSTORE:-}" ]; then
+            ./gradlew --no-daemon assembleRelease
+            cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/STARBLITZ-android.apk"
+          else
+            ./gradlew --no-daemon assembleDebug
+            cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/STARBLITZ-android.apk"
+          fi
+      - name: Comprobar que existe el APK (si falta, el job falla)
+        run: test -s STARBLITZ-android.apk && ls -l STARBLITZ-android.apk
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: STARBLITZ-Android
+          path: STARBLITZ-android.apk
+          retention-days: 30
+          if-no-files-found: error

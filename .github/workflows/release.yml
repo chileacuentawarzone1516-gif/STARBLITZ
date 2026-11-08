@@ -1,0 +1,88 @@
+# Prepara un BORRADOR de GitHub Release a partir de una etiqueta vX.Y.Z.
+# Instalador de Windows: el canónico (NSIS directo, windows.yml): el .exe publicado es el mismo binario que se probó.
+# Nunca publica: crea el borrador (draft) y lo publicas tú a mano tras revisar docs/PRUEBAS-HARDWARE.md.
+# Requisitos antes de etiquetar: versión de package.json == etiqueta sin «v», sección en CHANGELOG.md y etiqueta en main.
+# Recomendado: crear en Settings > Environments el entorno «release» con revisores obligatorios (aprobación manual).
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  verificar-etiqueta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: La etiqueta coincide con la versión, el CHANGELOG y main
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          for f in package.json apps/desktop/package.json apps/mobile/package.json; do
+            PKG=$(node -p "require('./$f').version")
+            [ "$VER" = "$PKG" ] || { echo "::error::La etiqueta ($VER) no coincide con la versión de $f ($PKG)."; exit 1; }
+          done
+          AND=$(sed -n 's/.*versionName "\([^"]*\)".*/\1/p' apps/mobile/android/app/build.gradle | head -n1)
+          [ "$VER" = "$AND" ] || { echo "::error::La etiqueta ($VER) no coincide con el versionName de Android ($AND)."; exit 1; }
+          grep -qF "## [$VER]" CHANGELOG.md || { echo "::error::CHANGELOG.md no tiene la sección [$VER]."; exit 1; }
+          # fetch-depth: 0 ya trae todas las ramas y etiquetas; no hace falta otro fetch (y no hay credenciales persistentes).
+          git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null || { echo "::error::origin/main no está disponible tras el checkout completo."; exit 1; }
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::La etiqueta no está en main."; exit 1; }
+
+  ci:
+    needs: verificar-etiqueta
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: verificar-etiqueta
+    uses: ./.github/workflows/build.yml
+    with:
+      require-signing: true
+    secrets:
+      ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+
+  borrador:
+    needs: [ci, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { persist-credentials: false }
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with: { path: out }
+      - name: Reunir archivos, calcular SHA-256 y preparar las notas
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          EXE="out/STARBLITZ-Windows/STARBLITZ-Setup-${VER}.exe"
+          ZIP="out/STARBLITZ-Windows/STARBLITZ-win-x64-portable.zip"
+          APK="out/STARBLITZ-Android/STARBLITZ-android.apk"
+          # Sin los tres archivos (y la huella del instalador) NO se crea el borrador: no puede haber una Release incompleta.
+          for f in "$EXE" "$ZIP" "$APK" out/STARBLITZ-Windows/STARBLITZ-Setup.sha256; do
+            [ -s "$f" ] || { echo "::error::Falta $f: no se crea el borrador."; exit 1; }
+          done
+          # El instalador que se publica es exactamente el que windows.yml compiló y probó.
+          (cd out/STARBLITZ-Windows && sha256sum -c STARBLITZ-Setup.sha256)
+          mkdir assets
+          cp "$EXE" "$ZIP" assets/
+          cp "$APK" "assets/STARBLITZ-${VER}-android-arm64.apk"
+          [ "$(ls assets | wc -l)" = 3 ] || { echo "::error::Se esperaban exactamente 3 archivos."; exit 1; }
+          (cd assets && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          awk -v v="## [$VER]" 'index($0,v)==1{f=1;next} f&&/^## \[/{exit} f' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "::error::Notas vacías para $VER."; exit 1; }
+      - name: Crear el BORRADOR (no se publica)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          FLAGS="--draft --verify-tag"
+          case "$VER" in *-*) FLAGS="$FLAGS --prerelease";; esac
+          gh release create "$GITHUB_REF_NAME" assets/* $FLAGS --title "STARBLITZ $VER" --notes-file notes.md

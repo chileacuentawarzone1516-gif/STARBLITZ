@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><defs>
+  <linearGradient id="sbRing" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#38bdf8"/><stop offset=".45" stop-color="#3b6cff"/><stop offset="1" stop-color="#a855f7"/>
+  </linearGradient>
+  <linearGradient id="sbS" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#e0f2ff"/><stop offset=".35" stop-color="#60a5fa"/><stop offset=".75" stop-color="#6d5dfc"/><stop offset="1" stop-color="#c084fc"/>
+  </linearGradient>
+  <radialGradient id="sbBg" cx=".5" cy=".38" r=".75">
+    <stop offset="0" stop-color="#1b2160"/><stop offset=".55" stop-color="#0b0e2e"/><stop offset="1" stop-color="#05061a"/>
+  </radialGradient>
+  <filter id="sbGlow" x="-40%" y="-40%" width="180%" height="180%">
+    <feGaussianBlur stdDeviation="10" result="b"/>
+    <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="sbSoft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter>
+</defs>
+  <path d="M223.5,74.5 Q256.0,42.0 288.5,74.5 L437.5,223.5 Q470.0,256.0 437.5,288.5 L288.5,437.5 Q256.0,470.0 223.5,437.5 L74.5,288.5 Q42.0,256.0 74.5,223.5 Z" fill="none" stroke="url(#sbRing)" stroke-width="22.0" stroke-linejoin="round" filter="url(#sbGlow)"/>
+  <path d="M220.7,144.4 L373.6,144.4 L342.2,183.6 L232.5,183.6 L220.7,242.4 L318.7,242.4 L334.4,262.0 L314.8,360.0 L291.3,379.6 L138.4,379.6 L169.8,340.4 L279.5,340.4 L291.3,281.6 L193.3,281.6 L177.6,262.0 L197.2,164.0 Z" fill="url(#sbS)" filter="url(#sbGlow)"/>
+  <path d="M374.0,84.0 Q374.0,128.0 418.0,128.0 Q374.0,128.0 374.0,172.0 Q374.0,128.0 330.0,128.0 Q374.0,128.0 374.0,84.0 Z" fill="#a78bfa" filter="url(#sbSoft)" opacity=".9"/>
+  <path d="M374.0,90.0 Q374.0,128.0 412.0,128.0 Q374.0,128.0 374.0,166.0 Q374.0,128.0 336.0,128.0 Q374.0,128.0 374.0,90.0 Z" fill="#ffffff"/>
+</svg>

@@ -1,0 +1,30 @@
+{
+ "default": "natural",
+ "profiles": [
+  {
+   "id": "natural",
+   "label": "Natural",
+   "description": "Equilibrado: suena a español nativo y adapta modismos y humor sin perder el significado."
+  },
+  {
+   "id": "fiel",
+   "label": "Fiel",
+   "description": "Se mantiene cerca del original: estructura, orden de las ideas y matices, con la mínima reescritura."
+  },
+  {
+   "id": "coloquial",
+   "label": "Coloquial",
+   "description": "Habla cotidiana y cercana: frases cortas, tuteo, interjecciones y muletillas naturales."
+  },
+  {
+   "id": "formal",
+   "label": "Formal",
+   "description": "Registro cuidado: trato de usted, vocabulario culto sin ser rebuscado y sin jerga."
+  },
+  {
+   "id": "adaptacion",
+   "label": "Adaptación narrativa",
+   "description": "Prioriza el efecto en el lector (ritmo, humor, dramatismo) sobre la literalidad; sin cambiar los hechos."
+  }
+ ]
+}

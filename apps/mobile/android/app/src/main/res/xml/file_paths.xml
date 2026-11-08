@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <external-path name="my_images" path="." />
+    <cache-path name="my_cache_images" path="." />
+    <!-- Exportaciones temporales (PDF/ZIP/imágenes) para el menú Compartir; nada más de la carpeta privada es accesible. -->
+    <files-path name="starblitz_exports" path="starblitz/exports/" />
+</paths>

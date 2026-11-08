@@ -1,0 +1,40 @@
+{
+  "name": "@starblitz/mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "STARBLITZ Mobile — app Android",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run typecheck && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "sync": "npm run build && cap sync android",
+    "test": "vitest run",
+    "e2e": "bash e2e/run.sh"
+  },
+  "dependencies": {
+    "@capacitor/android": "7.4.3",
+    "@capacitor/app": "7.1.0",
+    "@capacitor/core": "7.4.3",
+    "@capacitor/haptics": "7.0.2",
+    "@capacitor/share": "7.0.2",
+    "@capacitor/splash-screen": "7.0.3",
+    "@capacitor/status-bar": "7.0.3",
+    "@starblitz/shared": "1.0.0",
+    "@techstark/opencv-js": "4.10.0-release.1",
+    "lucide-react": "0.468.0",
+    "onnxruntime-web": "1.31.1",
+    "pdfjs-dist": "^4.10.38",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "zustand": "5.0.8"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "7.4.3",
+    "@types/react": "19.1.13",
+    "@types/react-dom": "19.1.9",
+    "@vitejs/plugin-react": "4.7.0",
+    "typescript": "5.9.3",
+    "vite": "6.3.6",
+    "vitest": "3.2.4"
+  }
+}
