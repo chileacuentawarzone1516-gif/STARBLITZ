@@ -8,3 +8,4 @@ export * from './typeset/fonts';
 export * from './typeset/render';
 export * from './llm';
 export * from './profiles';
+export * from './updater';

@@ -258,6 +258,7 @@ Resumen (detalle en [ROADMAP](docs/ROADMAP.md)):
 | [COMPILAR](docs/COMPILAR.md) | Compilar Windows, Android y CI |
 | [PRUEBAS](docs/PRUEBAS.md) · [PRUEBAS-HARDWARE](docs/PRUEBAS-HARDWARE.md) | Pruebas realizadas y pendientes |
 | [LIMITACIONES](docs/LIMITACIONES.md) · [FAQ](docs/FAQ.md) · [ROADMAP](docs/ROADMAP.md) | Qué falta y preguntas frecuentes |
+| [MOTOR-AUDITORIA](docs/MOTOR-AUDITORIA.md) · [MODELOS-INVESTIGACION](docs/MODELOS-INVESTIGACION.md) · [DISENO-FASES-5-7](docs/DISENO-FASES-5-7.md) | Auditoría del motor, comparativa de modelos (sin ganador aún) y diseño de segundo plano y actualizador |
 | [CONTRIBUTING](CONTRIBUTING.md) · [SECURITY](SECURITY.md) · [CHANGELOG](CHANGELOG.md) | Contribuir, seguridad e historial |
 
 ## Créditos y licencia

@@ -25,6 +25,21 @@ Leyenda de estado: 🔨 compilado · 🧪 pruebas automáticas o simuladas · �
 5. ⏳ Confirmar la licencia del proyecto y el logo oficial del repositorio.
 6. ⏳ Decidir la firma de código del ejecutable de Windows.
 
+## Mejora del motor de traducción (en curso)
+
+Detalle y estado por etapa en [MOTOR-AUDITORIA](MOTOR-AUDITORIA.md), [MODELOS-INVESTIGACION](MODELOS-INVESTIGACION.md) y
+[DISENO-FASES-5-7](DISENO-FASES-5-7.md).
+
+| Etapa | Estado |
+|---|---|
+| Protección de diálogos (no borrar sin traducción válida; OCR vacío visible) | 🧪 implementada y probada con piezas simuladas; ⏳ falta en el teléfono |
+| Medición por etapa y por página | 🧪 implementada; ⏳ falta medir en el Redmi Note 8 Pro |
+| Cola multi-proyecto, caché de OCR/traducción, concurrencia por RAM | ⏳ |
+| Segundo plano en Android (servicio en primer plano) | ⏳ diseño |
+| Estilo visual del texto | ⏳ diseño |
+| Actualizador integrado | 🧪 comparación de versiones y validación del manifiesto; ⏳ descarga e instalación (decisiones pendientes) |
+| Comparativa de modelos de OCR y traducción | ⏳ metadatos recopilados; sin mediciones ni ganador |
+
 ## Limitaciones conocidas que podrían abordarse
 
 Tomadas de [LIMITACIONES](LIMITACIONES.md); no son compromisos:

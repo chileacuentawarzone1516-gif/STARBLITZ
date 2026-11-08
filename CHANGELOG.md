@@ -26,6 +26,14 @@ las pruebas de [docs/PRUEBAS-HARDWARE.md](docs/PRUEBAS-HARDWARE.md).
 - Documentación técnica en `docs/` y automatización en `.github/workflows/` (integridad, pruebas, compilación,
   validación manual y borrador de Release).
 
+### Corregido
+
+- **Globos vacíos:** el original ya no se borra salvo donde hay una traducción válida (y, en el móvil, que quepa en el globo);
+  si no, se conserva y se marca para revisión (`original_kept`, `no_fit`).
+- **Textos omitidos por el OCR:** las lecturas vacías ya no se descartan en silencio; quedan como regiones en revisión (`ocr_empty`).
+- La traducción de todo el proyecto al terminar de importar viene **marcada por defecto** en Android.
+- Medición de segundos por etapa y por página en `project.last_job.timings`.
+
 ### Seguridad y privacidad
 
 - Sin telemetría ni cuentas. Las conexiones salientes se limitan a la descarga de modelos que el usuario solicita.
