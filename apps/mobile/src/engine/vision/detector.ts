@@ -24,6 +24,9 @@ const TILE_STRIDE = 0.6;
 interface Detections { boxes: Box[]; confs: number[]; classes: number[]; lines: Poly[] }
 
 export class TextDetector {
+  /** Tiempo acumulado de `session.run` en la última detección (medida). */
+  private inferMs = 0;
+
   private constructor(private readonly cv: Cv, private readonly session: OrtSession) {}
 
   static async create(session: OrtSession): Promise<TextDetector> {
@@ -31,8 +34,9 @@ export class TextDetector {
   }
 
   /** Detecta el texto de una página (matriz BGR). La máscara devuelta es de un canal, 0/255, a resolución original. */
-  async detect(img: Mat): Promise<{ blocks: DetectedBlock[]; mask: Mat }> {
+  async detect(img: Mat): Promise<{ blocks: DetectedBlock[]; mask: Mat; stats: { infer_ms: number; tiles: number } }> {
     const cv = this.cv;
+    this.inferMs = 0;
     const h = img.rows, w = img.cols;
     const alongY = h >= w;
     const spans = tileSpans(Math.max(h, w), Math.min(h, w));
@@ -73,7 +77,7 @@ export class TextDetector {
     const mask = new cv.Mat(h, w, cv.CV_8UC1);
     const md = mask.data;
     for (let i = 0; i < md.length; i++) md[i] = prob[i] > MASK_THRESH ? 255 : 0;
-    return { blocks: group(det, w, h), mask };
+    return { blocks: group(det, w, h), mask, stats: { infer_ms: this.inferMs, tiles: spans.length } };
   }
 
   /** Una pasada del modelo: bloques, líneas y probabilidad de texto por píxel. */
@@ -82,7 +86,9 @@ export class TextDetector {
     const h = img.rows, w = img.cols;
     const { tensor, ratio, padW, padH } = letterbox(cv, img);
     const feeds = { [this.session.inputNames[0]]: new ort.Tensor('float32', tensor, [1, 3, INPUT_SIZE, INPUT_SIZE]) };
+    const tRun = performance.now();
     const outputs = await this.session.run(feeds);
+    this.inferMs += performance.now() - tRun;
     const { blk, seg, det } = splitOutputs(outputs);
 
     const boxesPart = yoloPostprocess(blk.data as Float32Array, blk.dims[1], blk.dims[2], ratio, w, h);

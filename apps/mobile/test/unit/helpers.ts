@@ -226,7 +226,7 @@ export function makeEnv(pages: Record<string, FakePage>, patch: Parameters<typeo
   const env = { settings: mergeSettings(defaultSettings(), patch) } as Env;
   const processor = new Processor({
     store, bus, vision, settings: () => env.settings, device: new FakeDevice(), library, runtime: fakeRuntime, clientFactory: () => llm, guard, fits,
-    caches, concurrency: extra.concurrency,
+    caches, concurrency: extra.concurrency, ...(extra.pacer !== undefined ? { pacer: extra.pacer } : {}),
     ...(extra.ramGb ? { device: new FakeDevice({ ram_gb: extra.ramGb, vram_gb: 0, gpu: '', cpu: 'arm64', threads: 8 }) } : {}),
   });
   return Object.assign(env, { storage, store, bus, jobs: new JobManager(bus), vision, llm, library, processor, events, caches, probe });

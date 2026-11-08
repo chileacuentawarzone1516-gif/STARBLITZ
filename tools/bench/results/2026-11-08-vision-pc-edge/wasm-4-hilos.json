@@ -1,0 +1,199 @@
+{
+ "browser": "msedge",
+ "node": "v24.19.0",
+ "results": [
+  {
+   "threads": 4,
+   "isolated": true,
+   "cores": 16,
+   "rows": [
+    {
+     "page": "bench-1-pagina-900x1300.png",
+     "w": 900,
+     "h": 1300,
+     "cold": true,
+     "wall_ms": 6159,
+     "stats": {
+      "decode_ms": 25,
+      "detect_ms": 3372,
+      "detect_infer_ms": 3265,
+      "detect_tiles": 1,
+      "layout_ms": 58,
+      "ocr_ms": 770,
+      "blocks": 4,
+      "encode_ms": 56,
+      "total_ms": 4280
+     },
+     "regions": 4
+    },
+    {
+     "page": "bench-1-pagina-900x1300.png",
+     "w": 900,
+     "h": 1300,
+     "cold": false,
+     "wall_ms": 3916,
+     "stats": {
+      "decode_ms": 14,
+      "detect_ms": 3120,
+      "detect_infer_ms": 3053,
+      "detect_tiles": 1,
+      "layout_ms": 36,
+      "ocr_ms": 719,
+      "blocks": 4,
+      "encode_ms": 27,
+      "total_ms": 3916
+     },
+     "regions": 4
+    },
+    {
+     "page": "bench-1-pagina-900x1300.png",
+     "w": 900,
+     "h": 1300,
+     "cold": false,
+     "wall_ms": 3798,
+     "stats": {
+      "decode_ms": 15,
+      "detect_ms": 3050,
+      "detect_infer_ms": 2999,
+      "detect_tiles": 1,
+      "layout_ms": 38,
+      "ocr_ms": 675,
+      "blocks": 4,
+      "encode_ms": 20,
+      "total_ms": 3798
+     },
+     "regions": 4
+    },
+    {
+     "page": "bench-1-pagina-900x1300.png",
+     "clean_only_ms": 3900,
+     "bytes": 88156
+    },
+    {
+     "page": "bench-2-pagina-1620x2340.png",
+     "w": 1620,
+     "h": 2340,
+     "cold": true,
+     "wall_ms": 4350,
+     "stats": {
+      "decode_ms": 56,
+      "detect_ms": 3252,
+      "detect_infer_ms": 3127,
+      "detect_tiles": 1,
+      "layout_ms": 59,
+      "ocr_ms": 900,
+      "blocks": 4,
+      "encode_ms": 83,
+      "total_ms": 4350
+     },
+     "regions": 4
+    },
+    {
+     "page": "bench-2-pagina-1620x2340.png",
+     "w": 1620,
+     "h": 2340,
+     "cold": false,
+     "wall_ms": 4418,
+     "stats": {
+      "decode_ms": 54,
+      "detect_ms": 3409,
+      "detect_infer_ms": 3309,
+      "detect_tiles": 1,
+      "layout_ms": 52,
+      "ocr_ms": 832,
+      "blocks": 4,
+      "encode_ms": 71,
+      "total_ms": 4418
+     },
+     "regions": 4
+    },
+    {
+     "page": "bench-2-pagina-1620x2340.png",
+     "w": 1620,
+     "h": 2340,
+     "cold": false,
+     "wall_ms": 4094,
+     "stats": {
+      "decode_ms": 53,
+      "detect_ms": 3116,
+      "detect_infer_ms": 3031,
+      "detect_tiles": 1,
+      "layout_ms": 57,
+      "ocr_ms": 810,
+      "blocks": 4,
+      "encode_ms": 57,
+      "total_ms": 4093
+     },
+     "regions": 4
+    },
+    {
+     "page": "bench-2-pagina-1620x2340.png",
+     "clean_only_ms": 4271,
+     "bytes": 473148
+    },
+    {
+     "page": "bench-3-tira-900x3900.png",
+     "w": 900,
+     "h": 3900,
+     "cold": true,
+     "wall_ms": 17029,
+     "stats": {
+      "decode_ms": 41,
+      "detect_ms": 15205,
+      "detect_infer_ms": 14883,
+      "detect_tiles": 5,
+      "layout_ms": 32,
+      "ocr_ms": 1696,
+      "blocks": 11,
+      "encode_ms": 54,
+      "total_ms": 17028
+     },
+     "regions": 11
+    },
+    {
+     "page": "bench-3-tira-900x3900.png",
+     "w": 900,
+     "h": 3900,
+     "cold": false,
+     "wall_ms": 17202,
+     "stats": {
+      "decode_ms": 40,
+      "detect_ms": 15290,
+      "detect_infer_ms": 15015,
+      "detect_tiles": 5,
+      "layout_ms": 45,
+      "ocr_ms": 1771,
+      "blocks": 11,
+      "encode_ms": 55,
+      "total_ms": 17202
+     },
+     "regions": 11
+    },
+    {
+     "page": "bench-3-tira-900x3900.png",
+     "w": 900,
+     "h": 3900,
+     "cold": false,
+     "wall_ms": 17379,
+     "stats": {
+      "decode_ms": 41,
+      "detect_ms": 15371,
+      "detect_infer_ms": 15092,
+      "detect_tiles": 5,
+      "layout_ms": 40,
+      "ocr_ms": 1871,
+      "blocks": 11,
+      "encode_ms": 55,
+      "total_ms": 17378
+     },
+     "regions": 11
+    },
+    {
+     "page": "bench-3-tira-900x3900.png",
+     "clean_only_ms": 17294,
+     "bytes": 256258
+    }
+   ]
+  }
+ ]
+}

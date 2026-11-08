@@ -35,7 +35,9 @@ Detalle y estado por etapa en [MOTOR-AUDITORIA](MOTOR-AUDITORIA.md), [MODELOS-IN
 | Protección de diálogos (no borrar sin traducción válida; OCR vacío visible) | 🧪 implementada y probada con piezas simuladas; ⏳ falta en el teléfono |
 | Medición por etapa y por página + informe JSON exportable | 🧪 implementada; ⏳ falta medir en el Redmi Note 8 Pro ([protocolo](VALIDACION-FASE4-ANDROID.md)) |
 | Cola persistente, caché de OCR y de traducciones, concurrencia por RAM, liberación de memoria (móvil) | 🧪 implementada y probada con piezas simuladas; ⏳ sin medir en el teléfono; ⏳ aviso de la cola en la interfaz |
-| Segundo plano en Android (servicio en primer plano) | ⏳ diseño |
+| Control térmico adaptativo (estado/margen térmico de Android) | 🧪 implementado y probado con señales simuladas; ⏳ sin calibrar ni medir en el teléfono ([protocolo](VALIDACION-TERMICA-ANDROID.md)) |
+| Auditoría de la visión (cuello de botella: detector de texto) | 🧪 medida en PC; ⏳ falta el desglose en el Redmi; detector ligero **no** integrado ([OPTIMIZACION-ANDROID](OPTIMIZACION-ANDROID.md)) |
+| Segundo plano en Android (servicio en primer plano) | ⏳ diseño (no implementado) |
 | Estilo visual del texto | ⏳ diseño |
 | Actualizador integrado | 🧪 comparación de versiones y validación del manifiesto; ⏳ descarga e instalación (decisiones pendientes) |
 | Comparativa de modelos de traducción | 🧪 medida en PC (CPU) con corpus propio, 4 familias; ⏳ sin medir en el teléfono ni evaluada por personas; sin modelo por defecto nuevo ([BENCHMARK](BENCHMARK-TRADUCCION.md)) |

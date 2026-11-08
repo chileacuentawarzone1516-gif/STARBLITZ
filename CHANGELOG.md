@@ -13,6 +13,11 @@ las pruebas de [docs/PRUEBAS-HARDWARE.md](docs/PRUEBAS-HARDWARE.md).
 
 ### Añadido
 
+- **Auditoría de la visión y control térmico (móvil):** desglose de tiempos del análisis por página (decodificar, detector, viñetas, OCR, tramos) en el informe exportable;
+  `ThermalPacer`: descansos adaptativos según el estado térmico y el margen térmico de Android (o solo la batería si no hay API), con estadísticas de throttling; el plugin nativo
+  informa `thermal_headroom`. **Medido en PC:** el detector de texto es ~80–86 % del análisis; el detector ligero de PP-OCRv6 Manga es ~14–19× más rápido en inferencia
+  (no integrado: falta validar precisión con páginas reales). Parámetros térmicos **sin calibrar** y sin medir en el teléfono. Ver [docs/OPTIMIZACION-ANDROID.md](docs/OPTIMIZACION-ANDROID.md).
+
 - **Traducción en texto plano por lotes (móvil y PC):** `PlainTranslator` para modelos de traducción dedicados (PLaMo 3 Translate, Hy-MT2): una llamada por
   página con el formato nativo del modelo, glosario e historial como contexto, reintento solo de lo que falte y nada vacío ni aceptado si el modelo se niega.
   Medido en PC: el formato actual cuesta ~1 070 tokens de entrada y ~350 de salida por página con Qwen3.5-4B; en texto plano, ~200 y ~45; con PLaMo-0.8B, ~55 y ~42.

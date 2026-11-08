@@ -31,6 +31,8 @@ export interface ReportSummary {
   stages_s: { ocr: number; translate: number; clean: number };
   per_page_avg_s: { ocr: number; translate: number; clean: number };
   slowest_page: { page: number; total_s: number } | null;
+  /** Desglose del análisis (s, suma de las páginas analizadas de verdad, sin caché): dónde se va el tiempo de visión. */
+  vision_s: { pages: number; decode: number; detect: number; detect_infer: number; layout: number; ocr: number; encode: number; blocks: number; tiles_avg: number } | null;
   llm_tokens_per_s: { avg: number; min: number; max: number } | null;
   ocr_calls: number | null;
   ocr_cache_hits: number | null;
@@ -40,6 +42,8 @@ export interface ReportSummary {
   trims: number | null;
   overlapped_pages: number | null;
   concurrency_plan: string;
+  /** Control térmico de la tarea (presión observada, descansos, pausas); `null` si el dispositivo no informa su estado térmico. */
+  thermal: import('./processor').ChapterStats['thermal'];
   preserved_originals: number | null;
   device: {
     ram_total_mb: number | null;
@@ -70,6 +74,12 @@ export function summarize(lastJob: Record<string, unknown> | null, ramTotalMb: n
   const sum = (k: 'analyze_s' | 'translate_s' | 'clean_s') => pages.reduce((a, p) => a + (p[k] || 0), 0);
   const avg = (k: 'analyze_s' | 'translate_s' | 'clean_s') => (n ? r1(sum(k) / n) : 0);
   const slowest = pages.map((p) => ({ page: p.page, total_s: r1(p.analyze_s + p.translate_s + p.clean_s) })).sort((a, b) => b.total_s - a.total_s)[0] ?? null;
+  const vis = pages.map((p) => p.vision).filter((v): v is NonNullable<PageTiming['vision']> => !!v);
+  const vs = (k: 'decode_ms' | 'detect_ms' | 'detect_infer_ms' | 'layout_ms' | 'ocr_ms' | 'encode_ms') => r1(vis.reduce((a, v) => a + v[k], 0) / 1000);
+  const vision_s = vis.length ? {
+    pages: vis.length, decode: vs('decode_ms'), detect: vs('detect_ms'), detect_infer: vs('detect_infer_ms'), layout: vs('layout_ms'), ocr: vs('ocr_ms'),
+    encode: vs('encode_ms'), blocks: vis.reduce((a, v) => a + v.blocks, 0), tiles_avg: r1(vis.reduce((a, v) => a + v.detect_tiles, 0) / vis.length),
+  } : null;
   const tps = pages.map((p) => p.llm_tps).filter((x) => x > 0);
   const samples = [c?.device_start, ...pages.map((p) => p.device), c?.device_end].filter((s): s is DeviceSample => !!s);
   const temps = samples.map((s) => s.battery_temp_c).filter(known);
@@ -81,6 +91,7 @@ export function summarize(lastJob: Record<string, unknown> | null, ramTotalMb: n
   if (!samples.length) notes.push('El dispositivo no informó batería, temperatura ni memoria durante la tarea (normal en el navegador de desarrollo).');
   if (c && c.ocr_cache_hits > 0) notes.push(`${c.ocr_cache_hits} página(s) salieron de la caché de OCR: sus tiempos de lectura NO son una medida del OCR.`);
   if (c && c.translate_cache_hits > 0) notes.push(`${c.translate_cache_hits} respuesta(s) salieron de la caché de traducción: sus tiempos NO son una medida del modelo.`);
+  if (c?.thermal && c.thermal.source !== 'os') notes.push('Este dispositivo no informa el estado térmico de Android: el control térmico solo pudo usar la temperatura de la batería.');
   notes.push('«system_ram_used_max_mb» es del sistema completo, no de la app. «llm_tokens_per_s» usa la última llamada de cada página.');
   notes.push('Es el informe de la ÚLTIMA tarea terminada del proyecto: si se interrumpió, solo cuenta las páginas de la tarea que sí terminó.');
   return {
@@ -89,6 +100,7 @@ export function summarize(lastJob: Record<string, unknown> | null, ramTotalMb: n
     stages_s: { ocr: r1(sum('analyze_s')), translate: r1(sum('translate_s')), clean: r1(sum('clean_s')) },
     per_page_avg_s: { ocr: avg('analyze_s'), translate: avg('translate_s'), clean: avg('clean_s') },
     slowest_page: slowest,
+    vision_s,
     llm_tokens_per_s: tps.length ? { avg: r1(tps.reduce((a, b) => a + b, 0) / tps.length), min: r1(Math.min(...tps)), max: r1(Math.max(...tps)) } : null,
     ocr_calls: c ? (c.ocr_calls ?? c.ocr_cache_misses) : null,
     ocr_cache_hits: c ? c.ocr_cache_hits : null,
@@ -98,6 +110,7 @@ export function summarize(lastJob: Record<string, unknown> | null, ramTotalMb: n
     trims: c ? c.trims : null,
     overlapped_pages: c ? c.overlapped_pages : null,
     concurrency_plan: c?.plan ?? '',
+    thermal: c?.thermal ?? null,
     preserved_originals: typeof lastJob?.preserved === 'number' ? lastJob.preserved : null,
     device: {
       ram_total_mb: ramTotalMb,

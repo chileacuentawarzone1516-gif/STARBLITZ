@@ -1,0 +1,199 @@
+{
+ "browser": "msedge",
+ "node": "v24.19.0",
+ "results": [
+  {
+   "threads": 1,
+   "isolated": true,
+   "cores": 16,
+   "rows": [
+    {
+     "page": "bench-1-pagina-900x1300.png",
+     "w": 900,
+     "h": 1300,
+     "cold": true,
+     "wall_ms": 13946,
+     "stats": {
+      "decode_ms": 25,
+      "detect_ms": 10407,
+      "detect_infer_ms": 10299,
+      "detect_tiles": 1,
+      "layout_ms": 55,
+      "ocr_ms": 1536,
+      "blocks": 4,
+      "encode_ms": 56,
+      "total_ms": 12079
+     },
+     "regions": 4
+    },
+    {
+     "page": "bench-1-pagina-900x1300.png",
+     "w": 900,
+     "h": 1300,
+     "cold": false,
+     "wall_ms": 11549,
+     "stats": {
+      "decode_ms": 15,
+      "detect_ms": 9968,
+      "detect_infer_ms": 9896,
+      "detect_tiles": 1,
+      "layout_ms": 38,
+      "ocr_ms": 1504,
+      "blocks": 4,
+      "encode_ms": 25,
+      "total_ms": 11549
+     },
+     "regions": 4
+    },
+    {
+     "page": "bench-1-pagina-900x1300.png",
+     "w": 900,
+     "h": 1300,
+     "cold": false,
+     "wall_ms": 11652,
+     "stats": {
+      "decode_ms": 15,
+      "detect_ms": 10085,
+      "detect_infer_ms": 10033,
+      "detect_tiles": 1,
+      "layout_ms": 38,
+      "ocr_ms": 1492,
+      "blocks": 4,
+      "encode_ms": 22,
+      "total_ms": 11651
+     },
+     "regions": 4
+    },
+    {
+     "page": "bench-1-pagina-900x1300.png",
+     "clean_only_ms": 11625,
+     "bytes": 88156
+    },
+    {
+     "page": "bench-2-pagina-1620x2340.png",
+     "w": 1620,
+     "h": 2340,
+     "cold": true,
+     "wall_ms": 11790,
+     "stats": {
+      "decode_ms": 56,
+      "detect_ms": 9999,
+      "detect_infer_ms": 9895,
+      "detect_tiles": 1,
+      "layout_ms": 57,
+      "ocr_ms": 1592,
+      "blocks": 4,
+      "encode_ms": 85,
+      "total_ms": 11788
+     },
+     "regions": 4
+    },
+    {
+     "page": "bench-2-pagina-1620x2340.png",
+     "w": 1620,
+     "h": 2340,
+     "cold": false,
+     "wall_ms": 11777,
+     "stats": {
+      "decode_ms": 56,
+      "detect_ms": 9982,
+      "detect_infer_ms": 9884,
+      "detect_tiles": 1,
+      "layout_ms": 54,
+      "ocr_ms": 1623,
+      "blocks": 4,
+      "encode_ms": 62,
+      "total_ms": 11777
+     },
+     "regions": 4
+    },
+    {
+     "page": "bench-2-pagina-1620x2340.png",
+     "w": 1620,
+     "h": 2340,
+     "cold": false,
+     "wall_ms": 12030,
+     "stats": {
+      "decode_ms": 60,
+      "detect_ms": 10216,
+      "detect_infer_ms": 10122,
+      "detect_tiles": 1,
+      "layout_ms": 54,
+      "ocr_ms": 1628,
+      "blocks": 4,
+      "encode_ms": 72,
+      "total_ms": 12030
+     },
+     "regions": 4
+    },
+    {
+     "page": "bench-2-pagina-1620x2340.png",
+     "clean_only_ms": 12286,
+     "bytes": 473148
+    },
+    {
+     "page": "bench-3-tira-900x3900.png",
+     "w": 900,
+     "h": 3900,
+     "cold": true,
+     "wall_ms": 54035,
+     "stats": {
+      "decode_ms": 41,
+      "detect_ms": 50313,
+      "detect_infer_ms": 50029,
+      "detect_tiles": 5,
+      "layout_ms": 32,
+      "ocr_ms": 3591,
+      "blocks": 11,
+      "encode_ms": 56,
+      "total_ms": 54034
+     },
+     "regions": 11
+    },
+    {
+     "page": "bench-3-tira-900x3900.png",
+     "w": 900,
+     "h": 3900,
+     "cold": false,
+     "wall_ms": 53616,
+     "stats": {
+      "decode_ms": 40,
+      "detect_ms": 49852,
+      "detect_infer_ms": 49574,
+      "detect_tiles": 5,
+      "layout_ms": 45,
+      "ocr_ms": 3618,
+      "blocks": 11,
+      "encode_ms": 60,
+      "total_ms": 53615
+     },
+     "regions": 11
+    },
+    {
+     "page": "bench-3-tira-900x3900.png",
+     "w": 900,
+     "h": 3900,
+     "cold": false,
+     "wall_ms": 53570,
+     "stats": {
+      "decode_ms": 50,
+      "detect_ms": 49826,
+      "detect_infer_ms": 49543,
+      "detect_tiles": 5,
+      "layout_ms": 33,
+      "ocr_ms": 3603,
+      "blocks": 11,
+      "encode_ms": 58,
+      "total_ms": 53569
+     },
+     "regions": 11
+    },
+    {
+     "page": "bench-3-tira-900x3900.png",
+     "clean_only_ms": 53717,
+     "bytes": 256258
+    }
+   ]
+  }
+ ]
+}

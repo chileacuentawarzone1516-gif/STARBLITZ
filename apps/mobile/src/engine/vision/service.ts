@@ -8,7 +8,7 @@
 import type { Region } from '@starblitz/shared';
 import { CancelledError } from '../core/errors';
 import { Inpainter, LamaInpainter, type EraseTarget, type InpaintMode } from '../render/inpaint';
-import type { AnalysisResult, AnalyzeInput, ReadRegionInput, VisionPort } from '../pipeline/ports';
+import type { AnalysisResult, AnalysisStats, AnalyzeInput, ReadRegionInput, VisionPort } from '../pipeline/ports';
 import { configureOrt, createSession, releaseSession, type OrtOptions, type OrtSession } from '../runtime/ort';
 import { decodeToBgr, decodeToGray, encodeMat, loadCv, median, type Cv, type Mat } from '../runtime/cv';
 import { annotateForLlm } from './annotate';
@@ -138,14 +138,18 @@ export class VisionService implements VisionPort {
     const detector = await this.detectorEngine();
     const engine = await this.engineFor(input.lang);
     const cv = await this.runtime();
+    const t0 = performance.now();
     const img = await decodeToBgr(cv, input.original);
+    const tDecoded = performance.now();
     let mask: Mat | null = null;
     try {
       const found = await detector.detect(img);
+      const tDetected = performance.now();
       mask = found.mask;
       const { blocks } = found;
       const panels = detectPanels(cv, img);
       const order = readingOrder(blocks.map((b) => b.bbox), panels, input.direction);
+      const tLayout = performance.now();
       const medianLine = blocks.length ? median(blocks.map((b) => b.lineSize)) : 0;
       const regions: Region[] = [];
       for (const [rank, bi] of order.entries()) {
@@ -164,7 +168,15 @@ export class VisionService implements VisionPort {
         }
         regions.push(region);
       }
-      return { regions, panels, ocrEngine: engine.id, mask: await encodeMat(cv, mask) };
+      const tOcr = performance.now();
+      const png = await encodeMat(cv, mask);
+      const tEnd = performance.now();
+      const r1 = (n: number) => Math.round(n);
+      const stats: AnalysisStats = {
+        decode_ms: r1(tDecoded - t0), detect_ms: r1(tDetected - tDecoded), detect_infer_ms: r1(found.stats.infer_ms), detect_tiles: found.stats.tiles,
+        layout_ms: r1(tLayout - tDetected), ocr_ms: r1(tOcr - tLayout), blocks: blocks.length, encode_ms: r1(tEnd - tOcr), total_ms: r1(tEnd - t0),
+      };
+      return { regions, panels, ocrEngine: engine.id, mask: png, stats };
     } finally {
       img.delete();
       mask?.delete();

@@ -12,6 +12,8 @@ export interface DeviceStatus {
   battery_temp_c: number;
   /** PowerManager.THERMAL_STATUS_*: 0 normal · 1 leve · 2 moderado · 3 severo · 4 crítico · 5 emergencia · 6 apagado; -1 desconocido. */
   thermal: number;
+  /** Margen térmico previsto (API 30+): 1,0 = umbral de limitación severa; -1 si el dispositivo no lo informa. */
+  thermal_headroom?: number;
   power_save: boolean;
   ram_free_mb: number;
   low_memory: boolean;
@@ -44,7 +46,7 @@ export class DeviceStatusGuard implements DeviceGuard {
     const s = await this.status().catch(() => null);
     return s ? {
       t: Math.round(Date.now() / 1000), battery_pct: s.battery_pct, charging: s.charging, battery_temp_c: s.battery_temp_c,
-      thermal: s.thermal, ram_free_mb: s.ram_free_mb, low_memory: s.low_memory,
+      thermal: s.thermal, thermal_headroom: s.thermal_headroom ?? -1, ram_free_mb: s.ram_free_mb, low_memory: s.low_memory,
     } : null;
   }
 

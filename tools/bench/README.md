@@ -8,6 +8,8 @@ Compara modelos de traducción GGUF con el mismo `llama-server` que usa STARBLIT
 | `bench_translate.py` | Arranca `llama-server`, traduce el corpus con el perfil indicado y mide tiempo, tokens, RAM máxima y comprobaciones automáticas de fidelidad. Guarda **todas las salidas** para revisión humana |
 | `run_matrix.py` | Ejecuta la matriz completa (secuencial, para no falsear tiempos) |
 | `report_md.py` | Resume los resultados en Markdown (tabla y, con `--items`, todas las salidas) |
+| `vision_bench.mjs`, `make_bench_pages.py` | Mide por etapa el análisis de visión REAL (detector + OCR en WebAssembly, en el mismo Web Worker del APK) en un navegador Chromium, con 1/2/4 hilos y páginas sintéticas de varios tamaños. Tiempos de ESE equipo, no del teléfono |
+| `detector_latency.mjs` | Latencia de inferencia de modelos de detección con ONNX Runtime Web (WebAssembly, 1 hilo) en Node; no valida precisión |
 | `results/` | Resultados crudos (JSON) de las ejecuciones citadas en [BENCHMARK-TRADUCCION](../../docs/BENCHMARK-TRADUCCION.md) |
 
 ## Uso

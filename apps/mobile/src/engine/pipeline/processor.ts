@@ -21,9 +21,10 @@ import { ContextualTranslator, isRefusal, mergeMemory, type PageTranslator } fro
 import { PlainTranslator, mtFamily } from '../translate/plain';
 import { createClient, type ClientConfig, type LLMClient } from '../translate/llm';
 import type { LlmRuntime } from '../translate/runtime';
-import type { DeviceGuard, DeviceProvider, DeviceSample, ModelLibrary, VisionPort } from './ports';
+import type { AnalysisStats, DeviceGuard, DeviceProvider, DeviceSample, ModelLibrary, VisionPort } from './ports';
 import { analysisKey, type CachedAnalysis, type PipelineCaches } from './cache';
 import { planConcurrency, type ConcurrencyPlan, type ConcurrencyPolicy } from './governor';
+import { ThermalPacer, type PacerStats } from '../device/pacer';
 import { RunState, STAGE_WEIGHT } from './runstate';
 
 export const STAGES = ['analyze', 'translate', 'clean'] as const;
@@ -50,6 +51,8 @@ export interface ProcessorDeps {
   caches?: PipelineCaches;
   /** Política de concurrencia (por defecto, según RAM y memoria libre). Para pruebas. */
   concurrency?: ConcurrencyPolicy;
+  /** Control térmico (por defecto se crea uno si el dispositivo informa su estado térmico; `null` lo desactiva). */
+  pacer?: ThermalPacer | null;
 }
 
 interface Stats {
@@ -69,6 +72,8 @@ export interface PageTiming {
   llm_calls: number; tr_cache_hits: number;
   /** Estado del dispositivo al terminar la página (batería, temperatura, memoria libre); `null` si no se informa. */
   device?: DeviceSample | null;
+  /** Desglose del análisis (decodificar, detector, viñetas, OCR…); ausente si salió de la caché. */
+  vision?: AnalysisStats | null;
 }
 /** Medidas del capítulo completo (todas en segundos salvo que se indique). */
 export interface ChapterStats {
@@ -84,6 +89,8 @@ export interface ChapterStats {
   min_free_mb: number | null;
   /** Última decisión del gobernador de concurrencia. */
   plan: string;
+  /** Control térmico: presión observada, descansos y pausas (ausente si el dispositivo no informa su estado). */
+  thermal: PacerStats | null;
   /** Estado del dispositivo al empezar y al terminar la tarea. */
   device_start: DeviceSample | null;
   device_end: DeviceSample | null;
@@ -94,7 +101,7 @@ export interface TimingSummary { analyze_s: number; translate_s: number; clean_s
 export class RunTiming {
   readonly chapter: ChapterStats = {
     total_s: 0, model_load_s: 0, queue_wait_s: 0, llm_calls: 0, translate_cache_hits: 0, ocr_cache_hits: 0, ocr_cache_misses: 0, ocr_calls: 0,
-    overlapped_pages: 0, trims: 0, min_free_mb: null, plan: '', device_start: null, device_end: null,
+    overlapped_pages: 0, trims: 0, min_free_mb: null, plan: '', thermal: null, device_start: null, device_end: null,
   };
   private pages = new Map<string, PageTiming>();
   private at(pid: string, index: number): PageTiming {
@@ -102,7 +109,7 @@ export class RunTiming {
     if (!p) { p = { page: index + 1, analyze_s: 0, translate_s: 0, clean_s: 0, regions: 0, preserved: 0, llm_tps: 0, ocr_cached: false, llm_calls: 0, tr_cache_hits: 0 }; this.pages.set(pid, p); }
     return p;
   }
-  add(pid: string, index: number, stage: 'analyze' | 'translate' | 'clean', ms: number, extra: Partial<Pick<PageTiming, 'regions' | 'preserved' | 'llm_tps' | 'ocr_cached' | 'llm_calls' | 'tr_cache_hits'>> = {}): void {
+  add(pid: string, index: number, stage: 'analyze' | 'translate' | 'clean', ms: number, extra: Partial<Pick<PageTiming, 'regions' | 'preserved' | 'llm_tps' | 'ocr_cached' | 'llm_calls' | 'tr_cache_hits' | 'vision'>> = {}): void {
     const p = this.at(pid, index);
     p[`${stage}_s` as 'analyze_s'] += ms / 1000;
     Object.assign(p, extra);
@@ -154,6 +161,7 @@ export class Processor {
   private runVision: boolean | null = null;
   private useOcrCache = false;
   private lastAnalysisCached = false;
+  private lastAnalysisStats: AnalysisStats | null = null;
   constructor(private d: ProcessorDeps) {}
 
   // -- recursos -----------------------------------------------------------
@@ -265,6 +273,7 @@ export class Processor {
     this.useOcrCache = !force && !!this.d.caches;
     this.runVision = null;
     this.timing.chapter.device_start = await this.sampleDevice();
+    const pacer = this.d.pacer !== undefined ? this.d.pacer : (this.d.guard?.sample ? new ThermalPacer(() => this.sampleDevice(), (ms, sig) => sig ? sleepUnless(ms, sig) : new Promise<void>((r) => setTimeout(r, ms))) : null);
     const started = performance.now();
     let translator: PageTranslator | null = null;
     try {
@@ -318,6 +327,7 @@ export class Processor {
         plan = await this.plan(); // la memoria libre cambia mientras se trabaja
         const idx = allIds.indexOf(pid);
         const label = `Página ${idx + 1}`;
+        const pageStart = performance.now();
         try {
           if (need.includes('analyze') && run.data.pages[pid].state === 'pending') {
             await this.stepAnalyze(ctx, progress, run, projectId, pid, stats, label);
@@ -346,7 +356,9 @@ export class Processor {
           if (need.includes('clean')) stats.preserved += await this.stepClean(ctx, progress, run, projectId, pid, label);
           run.setPage(pid, 'done');
           this.timing.sample(pid, idx, await this.sampleDevice());
-          pages.delete(pid); // la página terminada no se vuelve a necesitar en memoria
+          pages.delete(pid);
+          // Descanso térmico proporcional al trabajo de esta página (0 mientras el teléfono no muestre presión térmica).
+          if (pacer) await pacer.afterWork(performance.now() - pageStart, ctx.signal, (message) => ctx.update({ message, force: true })); // la página terminada no se vuelve a necesitar en memoria
           progress.pageFinished(pid, need);
         } catch (e) {
           if (e instanceof CancelledError || e instanceof ModelMissingError || e instanceof LLMUnavailableError) throw e;
@@ -362,6 +374,7 @@ export class Processor {
       stats.seconds = Math.round((performance.now() - started) / 100) / 10;
       this.timing.chapter.total_s = (performance.now() - started) / 1000;
       this.timing.chapter.device_end = await this.sampleDevice();
+      this.timing.chapter.thermal = pacer && pacer.stats.samples ? pacer.summary() : null;
       if (translator) {
         this.timing.chapter.llm_calls = translator.stats.llm_calls;
         this.timing.chapter.translate_cache_hits = translator.stats.cache_hits;
@@ -401,7 +414,7 @@ export class Processor {
     const t0 = performance.now();
     try {
       const analyzed = await this.analyzePage(project, page, ctx.signal, this.useOcrCache);
-      this.timing.add(pid, page.index, 'analyze', performance.now() - t0, { regions: analyzed.regions.length, ocr_cached: this.lastAnalysisCached });
+      this.timing.add(pid, page.index, 'analyze', performance.now() - t0, { regions: analyzed.regions.length, ocr_cached: this.lastAnalysisCached, vision: this.lastAnalysisStats });
     } catch (e) {
       if (e instanceof ModelMissingError || e instanceof CancelledError) throw e;
       console.error(`Error analizando ${label}`, e);
@@ -522,7 +535,8 @@ export class Processor {
       engine: (await this.d.vision.fingerprint?.(lang)) ?? 'default',
     }) : '';
     this.lastAnalysisCached = false;
-    let res: { regions: Region[]; panels: BBox[]; ocrEngine: string; mask: Blob } | null = null;
+    this.lastAnalysisStats = null;
+    let res: { regions: Region[]; panels: BBox[]; ocrEngine: string; mask: Blob; stats?: AnalysisStats } | null = null;
     if (useCache && caches && key) {
       const hit = await caches.ocr.get<CachedAnalysis>(key);
       const mask = hit ? await caches.ocr.getBlob(key) : undefined;
@@ -538,6 +552,7 @@ export class Processor {
       res = await this.d.vision.analyze({
         original, lang, direction: project.reading_direction, sfx: project.sfx, pageHeight: page.height,
       }, signal);
+      this.lastAnalysisStats = res.stats ?? null;
       if (caches && key) {
         this.timing.chapter.ocr_cache_misses += 1;
         await caches.ocr.putBlob(key, res.mask).catch(() => undefined);

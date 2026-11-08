@@ -411,6 +411,13 @@ public class StarblitzNativePlugin extends Plugin {
             PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
             r.put("power_save", pm.isPowerSaveMode());
             r.put("thermal", Build.VERSION.SDK_INT >= 29 ? pm.getCurrentThermalStatus() : -1);
+            // Margen térmico previsto a 10 s (API 30+): 1,0 = umbral de limitación severa. Puede ser NaN si el dispositivo no lo informa → -1.
+            double headroom = -1;
+            if (Build.VERSION.SDK_INT >= 30) {
+                float h = pm.getThermalHeadroom(10);
+                if (!Float.isNaN(h) && !Float.isInfinite(h)) headroom = h;
+            }
+            r.put("thermal_headroom", headroom);
             ActivityManager am = (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
             ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
             am.getMemoryInfo(mi);
