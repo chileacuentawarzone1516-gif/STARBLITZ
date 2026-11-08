@@ -39,6 +39,11 @@ grep -qE ' lib/(x86|x86_64|armeabi)' "$LIST" && chk "sin otras arquitecturas" ba
 [ "$(grep -c '\.onnx$' "$LIST")" -eq 1 ] && chk "pesos de modelos en el APK" ok "solo el OCR PP-OCR (ppocr-rec.onnx); detector, Manga OCR, LaMa y LLM se descargan en el teléfono" || chk "pesos de modelos en el APK" bad "hay más .onnx de los previstos"
 W="$(mktemp -d)"; unzip -q -o "$APK" 'assets/public/assets/*.js' 'lib/arm64-v8a/*' -d "$W" 2>/dev/null
 grep -rqs '__sb' "$W/assets/public/assets" && chk "sin gancho E2E" bad "el JS contiene __sb (compilado con VITE_E2E)" || chk "sin gancho E2E" ok "no hay window.__sb en la interfaz de producción"
+# Código de las Fases 3 y 4 dentro de la interfaz compilada (literales de texto: sobreviven a la minificación). Si falta alguno, el APK
+# NO es el de la rama esperada.
+for MARK in 'starblitz-report/1' 'queue/main' 'cache/ocr' 'cache/tr' 'original_kept' 'ocr_empty'; do
+  grep -rqsF -- "$MARK" "$W/assets/public/assets" && chk "código de las Fases 3-4: $MARK" ok "presente en la interfaz compilada" || chk "código de las Fases 3-4: $MARK" bad "AUSENTE: el APK no contiene ese código"
+done
 ( cd "$W/lib/arm64-v8a" && sha256sum -c "$ROOT/apps/mobile/android/app/vendor/llama-libs.sha256" > "$OUT/hash-libs.txt" 2>&1 ) && chk "integridad de llama.cpp en el APK" ok "SHA-256 de las $EXPECT bibliotecas = vendor/llama-libs.sha256" || chk "integridad de llama.cpp en el APK" bad "hashes distintos (ver hash-libs.txt)"
 
 EXE="$W/lib/arm64-v8a/libllama-server-exe.so"
