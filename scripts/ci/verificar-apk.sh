@@ -4,7 +4,7 @@
 # físico y figura como pendiente en docs/PRUEBAS-HARDWARE.md).
 # Uso: scripts/ci/verificar-apk.sh <apk> <carpeta_de_informe>
 set -uo pipefail
-APK="$1"; OUT="$2"; mkdir -p "$OUT"
+APK="$1"; OUT="$2"; mkdir -p "$OUT"; OUT="$(cd "$OUT" && pwd)"   # ruta absoluta: algunas comprobaciones hacen cd
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BT="$(ls -d "${ANDROID_HOME:?}"/build-tools/* | sort -V | tail -1)"
 FAIL=0; REPORT="$OUT/apk-verificacion.md"
@@ -19,11 +19,12 @@ ok "archivo" "$(basename "$APK") · $(awk -v s="$SIZE" 'BEGIN{printf "%.1f MB", 
 "$BT/apksigner" verify --verbose --print-certs "$APK" > "$OUT/apksigner.txt" 2>&1 && chk "firma" ok "apksigner verify correcto: $(grep -m1 'Signer #1 certificate DN' "$OUT/apksigner.txt" | cut -c1-120)" || chk "firma" bad "apksigner falló (ver apksigner.txt)"
 "$BT/aapt2" dump badging "$APK" > "$OUT/badging.txt" 2>&1
 grep -q "^package: name='app.starblitz.mobile'" "$OUT/badging.txt" && chk "paquete" ok "$(grep -m1 '^package:' "$OUT/badging.txt" | cut -c1-140)" || chk "paquete" bad "nombre de paquete inesperado"
-grep -q "^sdkVersion:'28'" "$OUT/badging.txt" && chk "Android mínimo" ok "minSdk 28 (Android 9), target $(grep -o "targetSdkVersion:'[0-9]*'" "$OUT/badging.txt")" || chk "Android mínimo" bad "minSdk distinto de 28"
+grep -qE "^(min)?[sS]dkVersion:'28'" "$OUT/badging.txt" && chk "Android mínimo" ok "minSdk 28 (Android 9), target $(grep -o "targetSdkVersion:'[0-9]*'" "$OUT/badging.txt")" || chk "Android mínimo" bad "minSdk distinto de 28"
 ABIS=$(grep -m1 '^native-code:' "$OUT/badging.txt")
 [ "$ABIS" = "native-code: 'arm64-v8a'" ] && chk "ABIs" ok "solo arm64-v8a" || chk "ABIs" bad "${ABIS:-sin código nativo}"
 PERMS=$(grep "^uses-permission" "$OUT/badging.txt" | sed -E "s/.*name='([^']+)'.*/\1/" | sort | tr '\n' ' ')
-[ "$PERMS" = "android.permission.ACCESS_NETWORK_STATE android.permission.INTERNET " ] && chk "permisos" ok "solo INTERNET y ACCESS_NETWORK_STATE" || chk "permisos" bad "permisos inesperados: $PERMS"
+# VIBRATE lo añade @capacitor/haptics (retroalimentación háptica); DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION es un permiso propio de la app que añade androidx.
+[ "$PERMS" = "android.permission.ACCESS_NETWORK_STATE android.permission.INTERNET android.permission.VIBRATE app.starblitz.mobile.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION " ] && chk "permisos" ok "INTERNET, ACCESS_NETWORK_STATE y VIBRATE (+ el permiso interno de androidx); nada de almacenamiento, cámara ni ubicación" || chk "permisos" bad "permisos inesperados: $PERMS"
 "$BT/aapt2" dump xmltree --file AndroidManifest.xml "$APK" > "$OUT/manifest.txt" 2>&1
 grep -q 'allowBackup.*=false\|allowBackup.*0x0' "$OUT/manifest.txt" && chk "copia de seguridad en la nube" ok "allowBackup=false" || chk "copia de seguridad en la nube" bad "allowBackup no está desactivado"
 grep -q networkSecurityConfig "$OUT/manifest.txt" && chk "tráfico en claro" ok "networkSecurityConfig presente (solo 127.0.0.1/localhost en claro)" || chk "tráfico en claro" bad "sin networkSecurityConfig"

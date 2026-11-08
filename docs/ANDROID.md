@@ -23,7 +23,7 @@ flowchart TB
 - **Visión:** detector de texto, PP-OCR (incluido) y Manga OCR / LaMa opcionales, con WebAssembly y hilos.
 - **Traducción:** `llama-server` de llama.cpp (b12017, arm64) con modelos GGUF Q4/Q5; si Android lo cierra por memoria,
   la app lo relanza.
-- **Privacidad:** sin telemetría; permisos solo `INTERNET` y `ACCESS_NETWORK_STATE`; `allowBackup=false`.
+- **Privacidad:** sin telemetría; permisos solo `INTERNET`, `ACCESS_NETWORK_STATE` y `VIBRATE` (vibración háptica; permiso normal, sin avisos); `allowBackup=false`.
 
 ## Requisitos
 

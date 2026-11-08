@@ -90,7 +90,7 @@ escritura atómica. Móvil: mismos documentos en IndexedDB y las imágenes en la
   tiempo constante); identificadores validados (sin *path traversal*); ZIP sin extraer a disco con límites; Electron con
   `contextIsolation`, `sandbox`, sin `nodeIntegration`, navegación restringida, permisos denegados y CSP estricta;
   errores controlados al usuario con trazas solo en `logs/`. La clave de un servidor LLM externo no se devuelve en claro.
-- **Android**: `allowBackup=false`; permisos solo `INTERNET` y `ACCESS_NETWORK_STATE`; tráfico siempre HTTPS salvo
+- **Android**: `allowBackup=false`; permisos solo `INTERNET`, `ACCESS_NETWORK_STATE` y `VIBRATE` (retroalimentación háptica); tráfico siempre HTTPS salvo
   `127.0.0.1/localhost` (el servidor de modelos de la propia app); rutas del plugin validadas (`SafePath`); descargas
   con tamaño y SHA-256 comprobados; exportación a «Descargas/STARBLITZ» con MediaStore sin permisos de almacenamiento.
 - **Privacidad**: sin telemetría ni cuentas. Conexiones salientes solo para descargar modelos que el usuario pide

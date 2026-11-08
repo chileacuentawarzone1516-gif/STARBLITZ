@@ -34,7 +34,7 @@ Marca cada una cuando la hagas y copia el resultado al informe. Estado inicial d
 
 | # | Prueba | Cómo hacerla | Resultado esperado |
 |---|---|---|---|
-| A1 | Instalar el APK | Comprueba el SHA-256 (`certutil -hashfile <archivo>.apk SHA256`) contra `SHA256SUMS.txt` de la Release o, si el APK viene de `validacion.yml`, contra su `.sha256`; copia el APK al teléfono y ábrelo | Se instala; solo pide red (Internet y estado de red); ningún otro permiso |
+| A1 | Instalar el APK | Comprueba el SHA-256 (`certutil -hashfile <archivo>.apk SHA256`) contra `SHA256SUMS.txt` de la Release o, si el APK viene de `validacion.yml`, contra su `.sha256`; copia el APK al teléfono y ábrelo | Se instala; solo pide red (Internet y estado de red) y vibración (`VIBRATE`, permiso normal); ningún otro permiso (ni almacenamiento, cámara o ubicación) |
 | A2 | Primer arranque y perfil del dispositivo | Abre **Modelos** | Detecta RAM, espacio y núcleos; propone un perfil y un modelo que cabe |
 | A3 | Descarga de modelos (Wi‑Fi) | Detector (pestaña Visión) y un modelo de lenguaje. A mitad, apaga el Wi‑Fi y vuélvelo a encender | Reanuda sin empezar de cero; SHA-256 verificado; sin errores |
 | A4 | **`llama-server` arm64 se ejecuta de verdad** | **Modelos → Probar la traducción** con una frase en japonés y otra en inglés. Con depuración USB: `adb logcat \| findstr /i "llama starblitz"` | Traducción al español en pantalla; velocidad (tokens/s) registrada; sin `Permission denied`, `SIGILL` ni `dlopen failed` |

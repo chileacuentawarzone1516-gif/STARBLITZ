@@ -23,7 +23,7 @@ proyecto) corresponde el perfil «PC con GPU» y Qwen 3.5 9B. **No se ha podido 
 | Procesador | **arm64-v8a** (la inmensa mayoría de móviles desde 2017). Los x86/x86_64 (emuladores, algunos BlueStacks) abren la app pero **no pueden traducir** | Chip reciente con dotprod/i8mm |
 | RAM | 4 GB (modelo de 2 B, lento y limitado) | 6–8 GB (4 B) o ≥ 10 GB (9 B) |
 | Almacenamiento libre | ~0,3 GB (app) + 1,3 GB (modelo 2 B) + 0,5–1 GB de visión opcional | ≥ 6 GB |
-| Otros | Sin permisos especiales (solo Internet para descargar modelos) | Cargador conectado en capítulos largos |
+| Otros | Sin permisos especiales (Internet para descargar modelos y vibración háptica) | Cargador conectado en capítulos largos |
 
 El tamaño del APK no se ha medido (no se ha compilado): la interfaz y los modelos incluidos suman unos 49 MB y las
 bibliotecas de llama.cpp arm64 28 MB sin comprimir.
