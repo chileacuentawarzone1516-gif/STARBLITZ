@@ -99,6 +99,8 @@ export function renderPage(ctx: Ctx2D, base: CanvasImageSource, page: Page, opts
   if (opts.text === false) return;
   for (const region of page.regions) {
     if (!region.render || !region.translation.trim()) continue;
+    // Si el original se conservó (no se borró), no se dibuja encima la traducción: se solaparían los dos textos.
+    if (region.flags.includes('original_kept')) continue;
     drawRegion(ctx, region, layoutRegion(region, page));
   }
 }

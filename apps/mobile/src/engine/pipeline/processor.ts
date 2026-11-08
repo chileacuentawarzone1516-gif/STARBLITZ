@@ -17,7 +17,7 @@ import type { JobContext } from '../core/jobs';
 import { AUTO_LANG, effectiveLang, now } from '../core/schema';
 import { directionFor } from '../vision/langid';
 import type { ProjectStore } from '../store/projects';
-import { ContextualTranslator, mergeMemory } from '../translate/contextual';
+import { ContextualTranslator, isRefusal, mergeMemory } from '../translate/contextual';
 import { createClient, type ClientConfig, type LLMClient } from '../translate/llm';
 import type { LlmRuntime } from '../translate/runtime';
 import type { DeviceGuard, DeviceProvider, ModelLibrary, VisionPort } from './ports';
@@ -38,14 +38,75 @@ export interface ProcessorDeps {
   guard?: DeviceGuard;
   /** Para sustituir el cliente del modelo de lenguaje (pruebas). */
   clientFactory?: (cfg: ClientConfig, runtime: LlmRuntime) => LLMClient;
+  /**
+   * ¿Cabe la traducción en su globo con un tamaño legible? Lo aporta la interfaz (necesita lienzo y tipografías).
+   * Si no se indica, no se valida el ajuste (pruebas, Node).
+   */
+  fits?: (region: Region, page: Page) => boolean;
 }
 
 interface Stats {
   pages: number; pages_with_work: number; lines: number; review: number; refused: number; edited_by_reviewer: number;
   errors: number; model: string; seconds?: number; done_pages?: number; error_pages?: number;
+  /** Textos cuyo original se CONSERVÓ (no se borró) porque no había una traducción válida o no cabía. */
+  preserved: number;
+  /** Segundos por etapa y por página: base para localizar el cuello de botella con datos medidos. */
+  timings?: TimingSummary;
+}
+
+export interface PageTiming { page: number; analyze_s: number; translate_s: number; clean_s: number; regions: number; preserved: number; llm_tps: number }
+export interface TimingSummary { analyze_s: number; translate_s: number; clean_s: number; pages: PageTiming[] }
+
+/** Acumula el tiempo de cada etapa por página durante una ejecución. */
+export class RunTiming {
+  private pages = new Map<string, PageTiming>();
+  private at(pid: string, index: number): PageTiming {
+    let p = this.pages.get(pid);
+    if (!p) { p = { page: index + 1, analyze_s: 0, translate_s: 0, clean_s: 0, regions: 0, preserved: 0, llm_tps: 0 }; this.pages.set(pid, p); }
+    return p;
+  }
+  add(pid: string, index: number, stage: 'analyze' | 'translate' | 'clean', ms: number, extra: Partial<Pick<PageTiming, 'regions' | 'preserved' | 'llm_tps'>> = {}): void {
+    const p = this.at(pid, index);
+    p[`${stage}_s` as 'analyze_s'] += ms / 1000;
+    Object.assign(p, extra);
+  }
+  summary(): TimingSummary {
+    const r1 = (n: number) => Math.round(n * 10) / 10;
+    const pages = [...this.pages.values()].sort((a, b) => a.page - b.page).map((p) => ({ ...p, analyze_s: r1(p.analyze_s), translate_s: r1(p.translate_s), clean_s: r1(p.clean_s) }));
+    const sum = (k: 'analyze_s' | 'translate_s' | 'clean_s') => r1(pages.reduce((n, p) => n + p[k], 0));
+    return { analyze_s: sum('analyze_s'), translate_s: sum('translate_s'), clean_s: sum('clean_s'), pages };
+  }
+}
+
+/** ¿La traducción puede sustituir al original? Vacía, negativa del modelo o «sin traducir» → no. */
+export function hasValidTranslation(r: Pick<Region, 'translation' | 'source_text' | 'flags'>): boolean {
+  const t = r.translation.trim();
+  if (!t) return false;
+  if (r.flags.includes('refused') || r.flags.includes('untranslated')) return false;
+  return !(isRefusal(t) && !isRefusal(r.source_text));
+}
+
+export interface CleanPlan { erase: Region[]; kept: { region: Region; reason: 'untranslated' | 'no_fit' }[] }
+
+/**
+ * Decide qué textos se pueden borrar de verdad. REGLA DE INTEGRIDAD: el original solo se borra si hay una traducción
+ * válida con la que sustituirlo (y, si se puede comprobar, cabe en el globo). Si no, se conserva y se marca para revisión.
+ * Lo que la persona aprobó o editó a mano manda: es una decisión suya (también si borró el texto a propósito).
+ */
+export function planClean(page: Page, fits?: (r: Region, p: Page) => boolean): CleanPlan {
+  const plan: CleanPlan = { erase: [], kept: [] };
+  for (const r of page.regions) {
+    if (!r.erase) continue;
+    if (r.status === 'approved' || r.status === 'edited') { plan.erase.push(r); continue; }
+    if (!hasValidTranslation(r)) { plan.kept.push({ region: r, reason: 'untranslated' }); continue; }
+    if (r.render && fits && !fits(r, page)) { plan.kept.push({ region: r, reason: 'no_fit' }); continue; }
+    plan.erase.push(r);
+  }
+  return plan;
 }
 
 export class Processor {
+  private timing = new RunTiming();
   constructor(private d: ProcessorDeps) {}
 
   // -- recursos -----------------------------------------------------------
@@ -116,7 +177,8 @@ export class Processor {
     const totalUnits = ids.length * full;
     const preUnits = ids.reduce((n, pid) => n + full - sumWeights(todo.get(pid)!), 0);
     const progress = new Progress(ctx, run, totalUnits, preUnits, totalUnits - preUnits, this.d.guard);
-    const stats: Stats = { pages: ids.length, pages_with_work: [...todo.values()].filter((t) => t.length).length, lines: 0, review: 0, refused: 0, edited_by_reviewer: 0, errors: 0, model: '' };
+    const stats: Stats = { pages: ids.length, pages_with_work: [...todo.values()].filter((t) => t.length).length, lines: 0, review: 0, refused: 0, edited_by_reviewer: 0, errors: 0, model: '', preserved: 0 };
+    this.timing = new RunTiming();
     const started = performance.now();
     let translator: ContextualTranslator | null = null;
     try {
@@ -169,7 +231,7 @@ export class Processor {
             if (active.includes('analyze')) await analyzeAhead(pid);
             await this.stepTranslate(ctx, progress, run, translator, projectId, pid, story, stats, label);
           }
-          if (need.includes('clean')) await this.stepClean(ctx, progress, run, projectId, pid, label);
+          if (need.includes('clean')) stats.preserved += await this.stepClean(ctx, progress, run, projectId, pid, label);
           run.setPage(pid, 'done');
           progress.pageFinished(pid, need);
         } catch (e) {
@@ -184,6 +246,7 @@ export class Processor {
       }
 
       stats.seconds = Math.round((performance.now() - started) / 100) / 10;
+      stats.timings = this.timing.summary();
       const counts = run.counts();
       stats.done_pages = counts.done;
       stats.error_pages = counts.error;
@@ -212,8 +275,10 @@ export class Processor {
     progress.message(pid, 'analyze', `${label} · detectando diálogos`);
     const project = await this.d.store.get(projectId);
     const page = await this.d.store.getPage(projectId, pid);
+    const t0 = performance.now();
     try {
-      await this.analyzePage(project, page, ctx.signal);
+      const analyzed = await this.analyzePage(project, page, ctx.signal);
+      this.timing.add(pid, page.index, 'analyze', performance.now() - t0, { regions: analyzed.regions.length });
     } catch (e) {
       if (e instanceof ModelMissingError || e instanceof CancelledError) throw e;
       console.error(`Error analizando ${label}`, e);
@@ -233,6 +298,7 @@ export class Processor {
     if (!translator) throw new LLMUnavailableError(unavailableMessage(this.d.settings().llm.provider));
     run.setPage(pid, 'translating');
     progress.message(pid, 'translate', `${label} · traduciendo`);
+    const tStart = performance.now();
     const project = await store.get(projectId);
     const allIds = project.page_ids;
     const idx = allIds.indexOf(pid);
@@ -271,18 +337,25 @@ export class Processor {
         await store.savePage(projectId, fresh);
       });
     }
+    const llmStats = (translator.client as { lastStats?: { tps?: number } }).lastStats;
+    this.timing.add(pid, page.index, 'translate', performance.now() - tStart, { llm_tps: llmStats?.tps ?? 0 });
     run.setPage(pid, 'translated');
     progress.stepDone('translate', pid);
   }
 
-  private async stepClean(ctx: JobContext, progress: Progress, run: RunState, projectId: string, pid: string, label: string): Promise<void> {
+  /** Devuelve cuántos textos conservaron su original (no se borraron) en esta página. */
+  private async stepClean(ctx: JobContext, progress: Progress, run: RunState, projectId: string, pid: string, label: string): Promise<number> {
     await progress.checkpoint();
     run.setPage(pid, 'cleaning');
     progress.message(pid, 'clean', `${label} · reconstruyendo globos`);
     const project = await this.d.store.get(projectId);
     const page = await this.d.store.getPage(projectId, pid);
-    await this.cleanPage(project, page, ctx.signal); // sin textos que borrar, la página «limpia» es el original (igual que en el PC)
+    const t0 = performance.now();
+    const cleaned = await this.cleanPage(project, page, ctx.signal); // sin textos que borrar, la página «limpia» es el original (igual que en el PC)
+    const preserved = cleaned.regions.filter((r) => r.flags.includes('original_kept')).length;
+    this.timing.add(pid, page.index, 'clean', performance.now() - t0, { preserved });
     progress.stepDone('clean', pid);
+    return preserved;
   }
 
   private async markPageError(projectId: string, pid: string, message: string): Promise<void> {
@@ -395,11 +468,25 @@ export class Processor {
     const { store } = this.d;
     const original = await mustImage(store, project.id, page.id, 'original');
     const mask = (await store.image(project.id, page.id, 'mask')) ?? null;
-    const targets = page.regions.filter((r) => r.erase);
-    const cleaned = targets.length ? await this.d.vision.clean(original, mask, targets, signal) : original;
+    // El original SOLO se borra donde hay una traducción válida que lo sustituya; el resto se conserva y se marca.
+    const plan = planClean(page, this.d.fits);
+    const cleaned = plan.erase.length ? await this.d.vision.clean(original, mask, plan.erase, signal) : original;
     await store.putClean(project.id, page.id, cleaned);
+    const keptWhy = new Map(plan.kept.map((k) => [k.region.id, k.reason]));
     return store.mutate(project.id, async () => {
       const fresh = await store.getPage(project.id, page.id);
+      for (const r of fresh.regions) {
+        r.flags = r.flags.filter((f) => f !== 'original_kept' && f !== 'no_fit'); // se recalcula en cada reconstrucción
+        const why = keptWhy.get(r.id);
+        if (!why) continue;
+        r.flags = [...new Set([...r.flags, 'original_kept', ...(why === 'no_fit' ? ['no_fit'] : [])])].sort();
+        if (why === 'no_fit') {
+          r.status = 'review';
+          r.note = r.note || 'La traducción no cabe en el globo con un tamaño legible: se conservó el texto original. Acórtala o amplía el área y vuelve a reconstruir.';
+        } else if (!r.note) {
+          r.note = 'No hay una traducción válida para este texto: se conservó el original sin borrarlo.';
+        }
+      }
       fresh.has_clean = true;
       if (fresh.status !== 'error') fresh.status = 'cleaned';
       await store.savePage(project.id, fresh);

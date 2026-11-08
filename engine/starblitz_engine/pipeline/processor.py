@@ -29,7 +29,7 @@ from ..models.manager import ModelManager
 from ..projects.schema import AUTO_LANG, Bubble, Page, Project, Region, TextStyle, now
 from ..projects.store import ProjectStore
 from ..render.inpaint import EraseTarget, Inpainter
-from ..translate.contextual import ContextualTranslator, estimate_max_chars, merge_memory
+from ..translate.contextual import _REFUSAL, ContextualTranslator, estimate_max_chars, merge_memory
 from ..translate.llm import create_client
 from ..vision.bubbles import find_bubble, text_ring_stats
 from ..vision.detector import DetectedBlock, TextDetector
@@ -345,10 +345,15 @@ class Processor:
         for rank, bi in enumerate(order):
             block = blocks[bi]
             ocr = engine.recognize(img, block)
+            region = self._make_region(project, page, img, mask, block, ocr.text, ocr.confidence, ocr.engine,
+                                       rank, median_line)
             if not ocr.text.strip():
-                continue
-            regions.append(self._make_region(project, page, img, mask, block, ocr.text, ocr.confidence, ocr.engine,
-                                             rank, median_line))
+                # Antes se descartaba en silencio y el texto «desaparecía». Ahora queda visible para revisarlo: el original
+                # no se borra (no hay traducción) y la persona puede escribirlo o volver a leer el área.
+                region.flags = sorted({*region.flags, "ocr_empty"})
+                region.status = "review"
+                region.note = "El OCR no pudo leer este texto: escríbelo a mano o vuelve a leer el área."
+            regions.append(region)
         # Se conservan los textos que el usuario ya revisó si siguen en el mismo sitio.
         for r in regions:
             for old in keep.values():
@@ -469,10 +474,9 @@ class Processor:
         img = read_bgr(self.store.original_path(project.id, page))
         mask_path = self.store.mask_path(project.id, page.id)
         mask = read_gray(mask_path) if mask_path.exists() else np.zeros(img.shape[:2], np.uint8)
+        to_erase, kept = plan_clean(page.regions)
         targets = []
-        for r in page.regions:
-            if not r.erase:
-                continue
+        for r in to_erase:
             b = r.bubble
             targets.append(EraseTarget(
                 bbox=tuple(r.bbox), lines=[np.asarray(p, np.int32) for p in r.lines], line_size=r.line_size or 16.0,
@@ -484,11 +488,43 @@ class Processor:
         write_png(self.store.clean_path(project.id, page.id), cleaned)
         with self.store.lock(project.id):
             page = self.store.get_page(project.id, page.id)
+            for r in page.regions:
+                r.flags = [f for f in r.flags if f != "original_kept"]  # se recalcula en cada reconstrucción
+                if r.id in kept:
+                    r.flags = sorted({*r.flags, "original_kept"})
+                    if not r.note:
+                        r.note = "No hay una traducción válida para este texto: se conservó el original sin borrarlo."
             page.has_clean = True
             if page.status != "error":
                 page.status = "cleaned"
             self.store.save_page(project.id, page)
         return page
+
+
+def has_valid_translation(r: Region) -> bool:
+    """¿La traducción puede sustituir al original? Vacía, negativa del modelo o «sin traducir» → no."""
+    text = r.translation.strip()
+    if not text:
+        return False
+    if "refused" in r.flags or "untranslated" in r.flags:
+        return False
+    return not (_REFUSAL.search(text) and not _REFUSAL.search(r.source_text))
+
+
+def plan_clean(regions: list[Region]) -> tuple[list[Region], set[str]]:
+    """Qué textos se borran y cuáles conservan su original (ids). REGLA DE INTEGRIDAD: el original solo se borra si hay una
+    traducción válida; lo aprobado o editado a mano manda (es una decisión de la persona). La comprobación de que el texto
+    cabe en el globo la hace la interfaz (necesita lienzo y tipografías) y solo se aplica en el móvil."""
+    erase: list[Region] = []
+    kept: set[str] = set()
+    for r in regions:
+        if not r.erase:
+            continue
+        if r.status in ("approved", "edited") or has_valid_translation(r):
+            erase.append(r)
+        else:
+            kept.add(r.id)
+    return erase, kept
 
 
 def _classify(block: DetectedBlock, bubble, median_line: float) -> str:

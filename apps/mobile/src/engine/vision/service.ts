@@ -139,10 +139,17 @@ export class VisionService implements VisionPort {
         if (signal?.aborted) throw new CancelledError();
         const block = blocks[bi];
         const ocr = await engine.recognize(img, block);
-        if (!ocr.text.trim()) continue;
-        regions.push(makeRegion(cv, {
+        const region = makeRegion(cv, {
           img, mask, block, text: ocr.text, confidence: ocr.confidence, engine: ocr.engine, order: rank, medianLine, sfx: input.sfx, pageHeight: input.pageHeight,
-        }));
+        });
+        if (!ocr.text.trim()) {
+          // Antes se descartaba en silencio y el texto «desaparecía» del análisis. Ahora queda visible para revisarlo: el original
+          // no se borra (no hay traducción) y la persona puede escribirlo o volver a leer el área.
+          region.flags = [...new Set([...region.flags, 'ocr_empty'])].sort();
+          region.status = 'review';
+          region.note = 'El OCR no pudo leer este texto: escríbelo a mano o vuelve a leer el área.';
+        }
+        regions.push(region);
       }
       return { regions, panels, ocrEngine: engine.id, mask: await encodeMat(cv, mask) };
     } finally {

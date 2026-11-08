@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { PageState } from '@starblitz/shared';
 import { describeRun } from '../../src/engine/pipeline/runstate';
 import { RunState } from '../../src/engine/pipeline/runstate';
-import { iou, initialState, todoFor } from '../../src/engine/pipeline/processor';
+import { hasValidTranslation, initialState, iou, planClean, todoFor } from '../../src/engine/pipeline/processor';
 import { LANG_NAMES } from '../../src/engine/translate/prompts';
 import { makeEnv, pagesOf, seedProject, sleep, startRun, text, waitJob, type FakePage } from './helpers';
 
@@ -327,5 +327,126 @@ describe('utilidades de planificación', () => {
     expect(iou([0, 0, 10, 10], [0, 0, 10, 10])).toBe(1);
     expect(iou([0, 0, 10, 10], [20, 20, 30, 30])).toBe(0);
     expect(iou([0, 0, 10, 10], [5, 0, 15, 10])).toBeCloseTo(1 / 3, 5);
+  });
+});
+
+
+describe('integridad de los diálogos: nunca se borra el original sin una traducción válida', () => {
+  const PAGE: Record<string, FakePage> = { p1: { texts: ['おはよう', '待って', 'ありがとう'] } };
+
+  it('si el modelo rechaza un texto, ese globo conserva el original y queda marcado; los demás se reconstruyen', async () => {
+    const env = makeEnv(PAGE);
+    env.llm.refuse = (t) => t === '待って';
+    const project = await seedProject(env, ['p1']);
+    await waitJob(env, startRun(env, project.id).id);
+    const [page] = await pagesOf(env, project);
+    const refused = page.regions.find((r) => r.source_text === '待って')!;
+    expect(refused.translation).toBe('');
+    expect(refused.flags).toEqual(expect.arrayContaining(['refused', 'original_kept']));
+    expect(refused.status).toBe('review');
+    // El borrado solo se pidió para los textos con traducción válida
+    expect(env.vision.erased.at(-1)).toEqual(page.regions.filter((r) => r.source_text !== '待って').map((r) => r.id));
+    expect(env.vision.erased.at(-1)).not.toContain(refused.id);
+    expect((await env.store.get(project.id)).last_job).toMatchObject({ preserved: 1, refused: 1 });
+  });
+
+  it('si el modelo no devuelve traducción para un texto, tampoco se borra', async () => {
+    const env = makeEnv(PAGE);
+    const llm = env.llm as unknown as { chat: (m: unknown, s: unknown) => Promise<string> };
+    const original = llm.chat.bind(env.llm);
+    // Quita del resultado el elemento n.º 2: el modelo «olvida» ese texto
+    llm.chat = async (m: unknown, s: unknown) => {
+      const raw = JSON.parse(await original(m, s)) as { items: { n: number }[] };
+      raw.items = raw.items.filter((i) => i.n !== 2);
+      return JSON.stringify(raw);
+    };
+    const project = await seedProject(env, ['p1']);
+    await waitJob(env, startRun(env, project.id).id);
+    const [page] = await pagesOf(env, project);
+    const lost = page.regions[1];
+    expect(lost.translation).toBe('');
+    expect(lost.flags).toEqual(expect.arrayContaining(['untranslated', 'original_kept']));
+    expect(env.vision.erased.at(-1)).not.toContain(lost.id);
+    expect(env.vision.erased.at(-1)).toHaveLength(2);
+  });
+
+  it('sin traducir nada (solo analizar y reconstruir) no se borra ningún texto', async () => {
+    const env = makeEnv(PAGE);
+    const project = await seedProject(env, ['p1']);
+    await waitJob(env, startRun(env, project.id, { stages: ['analyze', 'clean'] }).id);
+    expect(env.vision.erased.flat()).toEqual([]); // ni siquiera se invoca el borrado
+    const [page] = await pagesOf(env, project);
+    expect(page.regions.every((r) => r.flags.includes('original_kept'))).toBe(true);
+    expect(page.has_clean).toBe(true); // la página limpia es una copia íntegra del original
+  });
+
+  it('si la traducción no cabe en el globo se conserva el original (y se marca «no cabe»)', async () => {
+    const env = makeEnv(PAGE, {}, undefined, (r) => r.source_text !== 'ありがとう');
+    const project = await seedProject(env, ['p1']);
+    await waitJob(env, startRun(env, project.id).id);
+    const [page] = await pagesOf(env, project);
+    const long = page.regions.find((r) => r.source_text === 'ありがとう')!;
+    expect(long.translation).toBe('ES(ありがとう)'); // la traducción se conserva para que la persona la acorte
+    expect(long.flags).toEqual(expect.arrayContaining(['no_fit', 'original_kept']));
+    expect(long.status).toBe('review');
+    expect(env.vision.erased.at(-1)).not.toContain(long.id);
+  });
+
+  it('lo aprobado o editado a mano manda: se borra aunque no pase la validación automática', async () => {
+    const env = makeEnv(PAGE);
+    const project = await seedProject(env, ['p1']);
+    await waitJob(env, startRun(env, project.id).id);
+    const [page] = await pagesOf(env, project);
+    await env.store.mutate(project.id, async () => {
+      const fresh = await env.store.getPage(project.id, page.id);
+      fresh.regions[0].status = 'approved';
+      await env.store.savePage(project.id, fresh);
+    });
+    const cur = await env.store.getPage(project.id, page.id);
+    // con una validación de ajuste que lo rechaza todo, solo el aprobado se borra
+    expect(planClean(cur, () => false).erase.map((r) => r.id)).toEqual([cur.regions[0].id]);
+  });
+
+  it('al reconstruir de nuevo se recalcula: una vez corregida la traducción, el texto vuelve a borrarse', async () => {
+    const env = makeEnv(PAGE);
+    env.llm.refuse = (t) => t === '待って';
+    const project = await seedProject(env, ['p1']);
+    await waitJob(env, startRun(env, project.id).id);
+    let [page] = await pagesOf(env, project);
+    const target = page.regions.find((r) => r.source_text === '待って')!;
+    await env.store.mutate(project.id, async () => {
+      const fresh = await env.store.getPage(project.id, page.id);
+      const r = fresh.regions.find((x) => x.id === target.id)!;
+      r.translation = '¡Espera!'; r.status = 'edited';
+      await env.store.savePage(project.id, fresh);
+    });
+    const cur = await env.store.getPage(project.id, page.id);
+    await env.processor.cleanPage(await env.store.get(project.id), cur);
+    [page] = await pagesOf(env, project);
+    const fixed = page.regions.find((r) => r.id === target.id)!;
+    expect(fixed.flags).not.toContain('original_kept');
+    expect(env.vision.erased.at(-1)).toContain(target.id);
+  });
+
+  it('hasValidTranslation: vacía, negativa del modelo o «sin traducir» no valen; una traducción normal sí', () => {
+    const base = { source_text: '待って', flags: [] as string[] };
+    expect(hasValidTranslation({ ...base, translation: '' })).toBe(false);
+    expect(hasValidTranslation({ ...base, translation: '   ' })).toBe(false);
+    expect(hasValidTranslation({ ...base, translation: 'Lo siento, no puedo ayudar con eso.' })).toBe(false);
+    expect(hasValidTranslation({ ...base, translation: '¡Espera!', flags: ['refused'] })).toBe(false);
+    expect(hasValidTranslation({ ...base, translation: '¡Espera!', flags: ['untranslated'] })).toBe(false);
+    expect(hasValidTranslation({ ...base, translation: '¡Espera!' })).toBe(true);
+  });
+});
+
+describe('medición por etapa', () => {
+  it('guarda los segundos de análisis, traducción y reconstrucción de cada página', async () => {
+    const env = makeEnv({ p1: { texts: ['おはよう'] }, p2: { texts: ['先輩！'] } });
+    const project = await seedProject(env, ['p1', 'p2']);
+    await waitJob(env, startRun(env, project.id).id);
+    const t = (await env.store.get(project.id)).last_job as { timings: { analyze_s: number; translate_s: number; clean_s: number; pages: { page: number; regions: number }[] } };
+    expect(t.timings.pages.map((p) => p.page)).toEqual([1, 2]);
+    expect(t.timings.pages.every((p) => p.regions === 1)).toBe(true);
+    for (const k of ['analyze_s', 'translate_s', 'clean_s'] as const) expect(t.timings[k]).toBeGreaterThanOrEqual(0);
   });
 });

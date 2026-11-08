@@ -59,6 +59,8 @@ export interface LocalEngineDeps {
   clientFactory?: ProcessorDeps['clientFactory'];
   /** Batería, temperatura, memoria y espacio: frena o pausa el procesamiento antes de que el teléfono sufra. */
   guard?: ProcessorDeps['guard'];
+  /** Validación de que la traducción cabe en su globo (necesita lienzo y tipografías: la aporta la interfaz). */
+  fits?: ProcessorDeps['fits'];
 }
 
 export interface StorageInfo {
@@ -89,7 +91,7 @@ export class LocalEngine {
     this.store = new ProjectStore(d.storage, d.thumbs);
     this.processor = new Processor({
       store: this.store, bus: this.bus, vision: d.vision, settings: () => this.settings, device: d.device, library: d.library, runtime: d.runtime,
-      clientFactory: d.clientFactory, guard: d.guard,
+      clientFactory: d.clientFactory, guard: d.guard, fits: d.fits,
     });
   }
 

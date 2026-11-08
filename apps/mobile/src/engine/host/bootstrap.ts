@@ -7,7 +7,7 @@
  * No depende del PC ni de la red: Internet solo se usa para descargar modelos y consultar Hugging Face.
  */
 import { Capacitor } from '@capacitor/core';
-import type { Settings } from '@starblitz/shared';
+import { regionFits, type Settings } from '@starblitz/shared';
 import { LocalEngine } from '../api/localEngine';
 import { BrowserImageCodec } from '../importers/codec';
 import { openPdf } from '../importers/pdf';
@@ -105,6 +105,8 @@ export async function createDeviceEngine(opts: DeviceEngineOptions = {}): Promis
 
   engine = await LocalEngine.create({
     storage, device, vision, visionModels, library, runtime, codec: new BrowserImageCodec(), pdf: openPdf, thumbs: browserThumbs, guard,
+    // El original solo se borra si la traducción cabe en su globo (mismo cálculo que el editor y la exportación).
+    fits: (region, page) => regionFits(region, page),
   });
   const listener = engine.listen((e) => wake.onEvent(e));
 

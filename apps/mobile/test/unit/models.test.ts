@@ -287,7 +287,7 @@ describe('motor de lenguaje del teléfono (llama-server)', () => {
     await lib.install('fake-org/Tiny-Qwen-GGUF', 'Tiny-Q8_0.gguf', { caps: PHONE, context: 8192 });
     (await rt.acquire(MODEL)).release();
     (await rt.acquire('tiny-qwen-gguf-tiny-q8-0')).release();
-    expect(host.starts.map((s) => s.model.split('/').pop())).toEqual(['Tiny-Q4_K_M.gguf', 'Tiny-Q8_0.gguf']);
+    expect(host.starts.map((s) => s.model.split(/[\\/]/).pop())).toEqual(['Tiny-Q4_K_M.gguf', 'Tiny-Q8_0.gguf']);
   });
 
   it('si el sistema cierra el servidor por falta de memoria, vuelve a iniciarse', async () => {

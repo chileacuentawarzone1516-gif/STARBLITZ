@@ -80,9 +80,13 @@ export class FakeVision implements VisionPort {
     return this.lang;
   }
 
-  async clean(original: Blob): Promise<Blob> {
+  /** Ids de los textos que se pidió borrar en cada reconstrucción (permite comprobar que no se borra sin traducción). */
+  erased: string[][] = [];
+
+  async clean(original: Blob, _mask?: Blob | null, regions: Region[] = []): Promise<Blob> {
     const key = await original.text();
     this.cleaned.push(key);
+    this.erased.push(regions.map((r) => r.id));
     return enc('clean:' + key);
   }
 
@@ -146,7 +150,8 @@ export interface Env {
   events: EngineEvent[];
 }
 
-export function makeEnv(pages: Record<string, FakePage>, patch: Parameters<typeof mergeSettings>[1] = {}, guard?: DeviceGuard): Env {
+export function makeEnv(pages: Record<string, FakePage>, patch: Parameters<typeof mergeSettings>[1] = {}, guard?: DeviceGuard,
+                        fits?: (r: Region, p: Page) => boolean): Env {
   const storage = new MemoryStorage();
   const store = new ProjectStore(storage, async (b) => b);
   const bus = new EventBus();
@@ -157,7 +162,7 @@ export function makeEnv(pages: Record<string, FakePage>, patch: Parameters<typeo
   const library = new FakeLibrary();
   const env = { settings: mergeSettings(defaultSettings(), patch) } as Env;
   const processor = new Processor({
-    store, bus, vision, settings: () => env.settings, device: new FakeDevice(), library, runtime: fakeRuntime, clientFactory: () => llm, guard,
+    store, bus, vision, settings: () => env.settings, device: new FakeDevice(), library, runtime: fakeRuntime, clientFactory: () => llm, guard, fits,
   });
   return Object.assign(env, { storage, store, bus, jobs: new JobManager(bus), vision, llm, library, processor, events });
 }
