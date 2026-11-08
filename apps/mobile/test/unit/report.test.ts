@@ -61,7 +61,7 @@ describe('resumen del informe', () => {
     const lastJob = await processAll(env, p.id);
     const s = summarize(lastJob, 8192)!;
     expect(s.pages_measured).toBe(3);
-    expect(s.total_s).toBeGreaterThan(0);
+    expect(s.total_s).toBeGreaterThanOrEqual(0); // se redondea a 0,1 s: una tarea simulada muy rápida puede dar 0
     expect(s.ocr_calls).toBe(3);
     expect(s.ocr_cache_hits).toBe(0);
     expect(s.llm_calls).toBeGreaterThan(0);
