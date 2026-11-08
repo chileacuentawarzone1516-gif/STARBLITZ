@@ -67,7 +67,7 @@ jobs:
           W=$(mktemp -d)
           javac -d "$W" apps/mobile/android/app/src/main/java/app/starblitz/mobile/nativeio/*.java \
             apps/mobile/android/app/src/test/java/app/starblitz/mobile/nativeio/NativeIoSelfTest.java
-          java -cp "$W" app.starblitz.mobile.nativeio.NativeIoSelfTest "$(command -v python)" engine/tests/fake_llama_server.py
+          java -cp "$W" app.starblitz.mobile.nativeio.NativeIoSelfTest "$(command -v python)" "$GITHUB_WORKSPACE/engine/tests/fake_llama_server.py"
 
   mobile-e2e:
     needs: test
