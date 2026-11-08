@@ -75,8 +75,48 @@ por un problema conocido de Windows con el servidor de lenguaje simulado, ajeno 
 probado: el comportamiento con el detector, el OCR y el rotulador **reales** en un teléfono (E2E en Chromium en CI, y
 la prueba en el dispositivo).
 
+## Fase 4: rendimiento y procesamiento por lotes (implementada y probada con piezas simuladas)
+
+Estado honesto: **todo lo de abajo está implementado y verificado por pruebas automáticas con visión y modelo SIMULADOS**.
+**No hay ninguna medición de tiempo real** (ni antes ni después) en el Redmi Note 8 Pro ni en otro equipo, así que **no se
+afirma ninguna mejora de velocidad**: lo que sí está demostrado es *qué trabajo deja de hacerse* (llamadas al OCR y al modelo
+evitadas) y que nada se pierde ni se estropea al hacerlo.
+
+| Pieza | Qué hace | Estado |
+|---|---|---|
+| **Cola persistente** (`pipeline/queue.ts`, `LocalEngine.queue/resumeQueue/dismissQueue`) | Cada petición de procesar se guarda en disco (`queue/main`) y sigue el estado real de la tarea. Tras un cierre de la app, lo que estaba en cola o en ejecución pasa a *interrumpido* y `resumeQueue()` lo retoma **en el orden en que se pidió**; el progreso por página sigue en `RunState`. Cancelar (también una tarea aún no iniciada) no la deja pendiente; los proyectos borrados se descartan; historial acotado a 30 | 🧪 probado (5 pruebas de la cola + 4 de `LocalEngine`: cierre brusco con 2 proyectos, cancelación, error, descarte) |
+| **Caché de OCR** (`pipeline/cache.ts`) | Clave = SHA-1 de la imagen + idioma + dirección + SFX + alto + **motor de lectura** (`fingerprint`: Manga OCR / PP-OCR por idioma). Guarda regiones, viñetas y máscara. «Forzar» la salta; un fallo de lectura **no se guarda**; entrada dañada o sin máscara → se vuelve a leer; tope de 400 entradas (las más antiguas se descartan) | 🧪 probado |
+| **Caché de traducciones** (`translate/contextual.ts`) | Clave = hash de **los mensajes completos enviados al modelo** (incluye contexto de páginas, resumen, glosario, sinopsis) + modelo + temperatura + proveedor + calidad + imágenes. Un cambio de contexto es un fallo de caché. Solo se guardan respuestas **completas y sanas** (nada vacío ni rechazado). «Forzar» y retraducir a propósito la saltan. Tope de 1500 | 🧪 probado |
+| **Gobernador de concurrencia** (`pipeline/governor.ts`) | Por defecto **todo en serie**. Solo se analiza la página siguiente mientras el modelo traduce la actual con ≥ 10,5 GB de RAM (móvil) / ≥ 16 GB (PC) **y** ≥ 2500 MB libres; con memoria baja vuelve a serie sin interrumpir. Nunca hay dos análisis ni dos peticiones al modelo a la vez. Resultado idéntico al de serie | 🧪 probado · ⚠ umbrales **sin calibrar** |
+| **Precarga del modelo sin competir con el OCR** | En serie, el modelo se carga **después** de analizar la primera página (visión libre) y antes de traducir; con solapado permitido se precarga ya al principio. Una sola carga por tarea | 🧪 probado (orden de eventos) |
+| **Llamadas redundantes eliminadas** | La decisión «enviar imagen al modelo» se toma una vez por tarea (antes, página a página); las respuestas idénticas salen de la caché; el análisis de la página siguiente no se repite | 🧪 probado |
+| **Liberación de memoria** | Las páginas terminadas se sueltan del mapa en memoria; con poca memoria (aviso del sistema o `DeviceStatusGuard`) la visión descarta Manga OCR y LaMa (se recargan solos si hacen falta) y la tarea sigue sin perder páginas | 🧪 probado con el hook `trim` simulado · ⏳ efecto real sin medir |
+| **Medición por etapa, página y capítulo** | `last_job.timings`: segundos por etapa y página, `ocr_cached`, `llm_calls`, `tr_cache_hits`; y `chapter`: total, carga del modelo, espera en cola, llamadas al modelo, aciertos/fallos de caché, páginas solapadas, recortes de memoria, mínimo de memoria libre y última decisión del gobernador | 🧪 probado |
+
+**Reglas de integridad comprobadas con las cachés activas:** el original no se modifica nunca (imagen original idéntica tras
+procesar; la reconstruida es otro archivo); un rechazo del modelo o una respuesta vacía no se guardan ni se reutilizan (se
+vuelve a intentar y puede acertar); lo reutilizado pasa por las mismas reglas de borrado (`planClean`) que lo nuevo; una página
+dañada se marca con error y no detiene el capítulo; una página sin textos no se toca.
+
+**Pruebas añadidas** (`apps/mobile/test/unit/performance.test.ts`, 34, y 4 en `localengine.test.ts`): gobernador, orden de la
+precarga, caché de OCR y de traducciones (aciertos, fallos por cambio de idioma/motor/contexto/calidad, fallos no guardados,
+«forzar», tope), cola, memoria, capítulo de 40 páginas, 12 páginas con cancelación y reanudación (solo se rehace lo que falta),
+capítulo con página dañada + rechazo + página vacía, reproceso de una copia sin OCR ni modelo, y dos proyectos simultáneos
+(se serializan). Suite móvil completa: 195/195; compartido: 30/30; `tsc` sin errores.
+
+**Lo que NO está hecho / NO verificado (no se marca como completado):**
+
+- ⏳ **Ninguna medición de tiempo real** (ni antes/después). Las hipótesis de lentitud de arriba siguen sin confirmar.
+- ⏳ Los umbrales del gobernador (10,5 GB, 16 GB, 2500 MB) y los tamaños de caché (400/1500) son **conservadores y sin calibrar**.
+- ⏳ El efecto real de `trim` en el consumo de memoria del `WebView` y de Android no se ha medido.
+- ⏳ Interfaz: el motor expone `queue()/resumeQueue()/dismissQueue()`, pero **no hay todavía un aviso en la pantalla de inicio**
+  para peticiones que quedaron en cola sin llegar a empezar (las ejecuciones con progreso guardado ya ofrecen «Reanudar»).
+  La reanudación **no** es automática al abrir la app, para no consumir batería sin que la persona lo decida.
+- ⏳ El **motor de PC (Python)** no se ha tocado en esta fase: la cola y las cachés son del motor móvil.
+- ⏳ No se ha optimizado la resolución del detector ni los recortes (sin datos que lo justifiquen aún).
+
 ## Pendiente (siguientes etapas)
 
-Cola persistente multi-proyecto, caché de OCR y traducciones, concurrencia limitada por RAM, optimización de resolución y
-recortes (Fase 4); servicio en segundo plano (Fase 5); estilo visual (Fase 6); actualizador (Fase 7); conjunto de
-pruebas reproducible y medición en el Redmi Note 8 Pro (Fase 8).
+Servicio en segundo plano (Fase 5, solo diseño: ver [DISENO-FASES-5-7](DISENO-FASES-5-7.md)); estilo visual (Fase 6);
+actualizador (Fase 7); conjunto de pruebas reproducible y **medición en el Redmi Note 8 Pro** (Fase 8), que es lo que
+permitirá decidir hilos de `llama`, prefill, resolución y los umbrales del gobernador.

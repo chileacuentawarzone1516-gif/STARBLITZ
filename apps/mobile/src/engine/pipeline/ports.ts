@@ -47,6 +47,10 @@ export interface VisionPort {
   refresh?(): void;
   /** Libera los motores cargados (memoria). */
   dispose?(): Promise<void>;
+  /** Identidad del motor de lectura para ese idioma (forma parte de la clave de la caché de OCR). */
+  fingerprint?(lang: string): Promise<string>;
+  /** Poca memoria: suelta los modelos grandes opcionales sin detener el trabajo. */
+  trim?(): Promise<void>;
 }
 
 export interface DeviceProvider {
@@ -71,4 +75,6 @@ export interface GuardVerdict {
 /** Vigila la batería, la temperatura, la memoria y el espacio durante el procesamiento. */
 export interface DeviceGuard {
   check(): Promise<GuardVerdict>;
+  /** Memoria libre ahora (MB) y si el sistema avisa de que falta; `null` si no se conoce. */
+  memory?(): Promise<{ free_mb: number; low: boolean } | null>;
 }

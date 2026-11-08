@@ -8,6 +8,7 @@
  */
 import type { Character, GlossaryEntry, Page, Project, Region, Settings } from '@starblitz/shared';
 import { CancelledError } from '../core/errors';
+import { hashBytes, hashText, type DocCache } from '../pipeline/cache';
 import { effectiveLang } from '../core/schema';
 import type { ChatMessage, LLMClient } from './llm';
 import {
@@ -41,8 +42,45 @@ export interface TranslateOptions {
   signal?: AbortSignal;
 }
 
+export interface TranslatorOptions {
+  /** Caché de respuestas del modelo (si se omite, no se usa). */
+  cache?: DocCache;
+  /** Parte de la clave de la caché: proveedor, temperatura, visión… (lo que condiciona la respuesta y no va en los mensajes). */
+  salt?: string;
+}
+
+/** Una respuesta solo se guarda si está completa y sana: nada vacío ni rechazado por el modelo. */
+export function isCacheableResult(kind: 'translate' | 'review', result: Record<string, unknown>, sources: string[]): boolean {
+  const items = result.items;
+  if (!Array.isArray(items) || !items.length) return false;
+  return items.every((it) => {
+    if (!isObj(it)) return false;
+    const text = str(kind === 'review' ? it.final : it.translation).trim();
+    return !!text && !(isRefusal(text) && !sources.some((s) => isRefusal(s)));
+  });
+}
+
 export class ContextualTranslator {
-  constructor(readonly client: LLMClient, readonly model: string, private s: Settings['translation']) {}
+  /** Llamadas reales al modelo y respuestas servidas desde la caché (para medir y para comprobar que no hay llamadas redundantes). */
+  readonly stats = { llm_calls: 0, cache_hits: 0 };
+
+  constructor(readonly client: LLMClient, readonly model: string, private s: Settings['translation'], private o: TranslatorOptions = {}) {}
+
+  /** Llama al modelo, o devuelve la respuesta guardada si el MISMO mensaje completo (con todo su contexto) ya se tradujo. */
+  private async callJson(kind: 'translate' | 'review', messages: ChatMessage[], schema: object, opts: { model: string; temperature?: number; signal?: AbortSignal }, sources: string[]): Promise<Record<string, unknown>> {
+    const cache = this.o.cache;
+    let key = '';
+    if (cache) {
+      key = hashText(JSON.stringify(['tr-v1', kind, this.o.salt ?? '', opts.model, opts.temperature ?? null,
+        messages.map((m) => [m.role, m.content, (m.images ?? []).map((i) => hashBytes(i))])]));
+      const hit = await cache.get<Record<string, unknown>>(key);
+      if (hit && isCacheableResult(kind, hit, sources)) { this.stats.cache_hits += 1; return structuredClone(hit); }
+    }
+    this.stats.llm_calls += 1;
+    const result = await this.client.chatJson(messages, schema, opts);
+    if (cache && isCacheableResult(kind, result, sources)) await cache.put(key, result);
+    return result;
+  }
 
   async translatePage(project: Project, page: Page, o: TranslateOptions): Promise<PageTranslation> {
     // Lo que la persona aprobó o editó a mano nunca se vuelve a traducir (se usa solo como contexto).
@@ -68,9 +106,9 @@ export class ContextualTranslator {
     }
     user += `\nDevuelve un elemento en «items» por cada número traducible. En «page_summary»: ${SUMMARY_NOTE}`;
 
-    const result = await this.client.chatJson(
+    const result = await this.callJson('translate',
       [{ role: 'system', content: system }, { role: 'user', content: user, images: o.imageJpeg ? [o.imageJpeg] : [] }],
-      TRANSLATION_SCHEMA, { model: this.model, signal: o.signal });
+      TRANSLATION_SCHEMA, { model: this.model, signal: o.signal }, targets.map((r) => r.source_text));
     const byN = indexByNumber(result.items);
 
     const drafts = new Map<string, Item>();
@@ -152,7 +190,7 @@ export class ContextualTranslator {
     const messages: ChatMessage[] = [{ role: 'system', content: system }, { role: 'user', content: user }];
     let result: Record<string, unknown>;
     try {
-      result = await this.client.chatJson(messages, REVIEW_SCHEMA, { model: this.model, temperature: 0.2, signal });
+      result = await this.callJson('review', messages, REVIEW_SCHEMA, { model: this.model, temperature: 0.2, signal }, targets.map((r) => r.source_text));
     } catch (e) { // la corrección es una mejora: si falla se conserva el borrador
       if (e instanceof CancelledError) throw e;
       console.warn(`Fallo en la revisión editorial de la página ${page.index + 1}:`, e instanceof Error ? e.message : e);

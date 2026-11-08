@@ -40,6 +40,11 @@ export class DeviceStatusGuard implements DeviceGuard {
     private onLowMemory?: () => void,
   ) {}
 
+  async memory(): Promise<{ free_mb: number; low: boolean } | null> {
+    const s = await this.status().catch(() => null);
+    return s && s.ram_free_mb >= 0 ? { free_mb: s.ram_free_mb, low: s.low_memory } : null;
+  }
+
   async check(): Promise<GuardVerdict> {
     const l = this.limits;
     const s = await this.status();

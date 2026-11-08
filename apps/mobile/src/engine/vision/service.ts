@@ -102,6 +102,19 @@ export class VisionService implements VisionPort {
     return this.lama;
   }
 
+  /** Motor de lectura que se usaría para este idioma: forma parte de la clave de la caché de OCR. */
+  async fingerprint(lang: string): Promise<string> {
+    return lang === 'ja' && (await this.assets.hasMangaOcr()) ? 'manga-ocr' : `ppocr-${lang}`;
+  }
+
+  /** Poca memoria: se sueltan los modelos grandes opcionales (Manga OCR y LaMa); se recargan solos si hacen falta. */
+  async trim(): Promise<void> {
+    const manga = this.ocr.get('manga-ocr');
+    if (manga) { this.ocr.delete('manga-ocr'); await manga.dispose(); }
+    await this.lama?.dispose();
+    this.lama = undefined;
+  }
+
   /** Los ajustes cambiaron: se vuelve a decidir el modo de reconstrucción y se relee qué modelos opcionales hay. */
   refresh(): void {
     this.inpainter.mode = this.opts.inpaintMode();

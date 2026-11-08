@@ -78,7 +78,7 @@ export interface WorkerHostDeps {
   fetcher?: Fetch;
 }
 
-export type VisionServiceLike = Pick<VisionService, 'analyze' | 'detectLanguage' | 'clean' | 'annotate' | 'readRegion' | 'refresh' | 'dispose'>;
+export type VisionServiceLike = Pick<VisionService, 'analyze' | 'detectLanguage' | 'clean' | 'annotate' | 'readRegion' | 'refresh' | 'dispose'> & Partial<Pick<VisionService, 'trim'>>;
 
 export class VisionWorkerHost {
   private service: VisionServiceLike | null = null;
@@ -139,6 +139,7 @@ export class VisionWorkerHost {
       case 'clean': return this.svc().clean(msg.original, msg.mask, msg.regions, signal);
       case 'annotate': return this.svc().annotate(msg.original, msg.boxes);
       case 'readRegion': return this.svc().readRegion(msg.input);
+      case 'trim': await this.service?.trim?.(); return undefined;
       case 'dispose': await this.service?.dispose?.(); this.service = null; return undefined;
     }
   }

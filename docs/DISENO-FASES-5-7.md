@@ -31,21 +31,61 @@ reanudar una tarea interrumpida (la reanudación por páginas ya existe). C qued
 - Procesar una página como unidad atómica: si el sistema mata el proceso, solo se repite la página en curso.
 - Respetar la `DeviceStatusGuard` (batería ≤ 10 %, calor, poco espacio) también en segundo plano.
 
-### Restricciones de Android a contrastar (❓ no verificadas en dispositivo)
+### Restricciones de Android a contrastar (❓ = documentación oficial recordada, **no verificada en un dispositivo**)
 
-- **Android 13+:** permiso de notificaciones en tiempo de ejecución (`POST_NOTIFICATIONS`).
-- **Android 14 (API 34):** todo FGS debe declarar un **tipo** en el manifiesto y el permiso correspondiente
-  (`FOREGROUND_SERVICE_*`); hay tipos (p. ej. `dataSync`) y también `specialUse`, con justificación.
-- **Android 15 (API 35):** ❓ algunos tipos de FGS tienen **límite de tiempo** por periodo; un capítulo largo debe caber o
-  reiniciarse limpiamente (la reanudación por página lo permite).
-- **Android 12+:** arrancar un FGS desde segundo plano está restringido: debe iniciarse mientras la app es visible o con una
-  excepción permitida. El arranque se hará desde la acción del usuario («Traducir proyecto»).
-- **Android 16 (API 36):** ❓ revisar cambios en cuotas y en trabajos; **no se ha comprobado**.
-- **Fabricantes (MIUI/HyperOS del Redmi Note 8 Pro):** el gestor de batería puede matar el servicio aunque Android lo permita;
-  normalmente hace falta marcar la app como «sin restricciones» y activar el inicio automático. ❓ Se documentará el
-  procedimiento y se mostrará una guía en la app tras probarlo en el dispositivo.
-- El `llama-server` es un hijo del proceso de la app: si el proceso muere, muere con él; hay que relanzarlo en la reanudación
-  (ya lo hace el motor).
+Antes de implementar hay que contrastar cada fila con la documentación vigente de Android y con una prueba real; el Redmi Note 8
+Pro, además, ❓ puede estar en una versión de Android/MIUI anterior a la 14 (hay que anotar la del equipo de pruebas): las
+filas de Android 14–16 se probarían en otro dispositivo o emulador.
+
+| Versión / entorno | Restricción relevante | Consecuencia para el diseño | Estado |
+|---|---|---|---|
+| **Android 9–11** (base actual del proyecto, minSdk 28) | Sin tipos de FGS obligatorios; limitaciones de ejecución en segundo plano desde 8; en 10+ no se puede abrir actividades desde segundo plano | FGS clásico con notificación; sin permisos extra | ❓ |
+| **Android 12 (API 31)** | **No se puede arrancar un FGS desde segundo plano** salvo excepciones; las alarmas exactas requieren permiso | El FGS se inicia **solo desde una acción visible** («Procesar proyecto»); nunca desde un `BroadcastReceiver` al arrancar | ❓ |
+| **Android 13 (API 33)** | Permiso de notificaciones en tiempo de ejecución (`POST_NOTIFICATIONS`); la persona puede cerrar la notificación del FGS | Pedir el permiso en contexto; si se niega, avisar de que el progreso solo se verá dentro de la app (el FGS funciona igual) | ❓ |
+| **Android 14 (API 34)** | **Todo FGS debe declarar un tipo** en el manifiesto y el permiso `FOREGROUND_SERVICE_<TIPO>`; arrancar sin tipo válido lanza excepción | Candidatos: `dataSync`, `mediaProcessing` (API 35) o `specialUse` (exige justificación en el manifiesto; la distribución es por APK propio, no por Play) | ❓ elegir tras probar |
+| **Android 15 (API 35)** | `dataSync` y `mediaProcessing` tienen un **límite de tiempo acumulado** por periodo; al agotarse el sistema llama a `onTimeout()` y el servicio debe parar en pocos segundos | Un capítulo largo debe poder **detenerse limpiamente y reanudarse**: ya existe (estado por página + cola persistente de la Fase 4); `onTimeout` debe pausar la tarea y avisar | ❓ valor exacto del límite sin verificar |
+| **Android 16 (API 36)** | ❓ posibles cambios en cuotas de trabajos/FGS y en la optimización por defecto de procesos en segundo plano | Tratar cualquier cuota como causa de parada **recuperable**, nunca como error | ❓ no se ha comprobado |
+| **MIUI / HyperOS (Redmi Note 8 Pro)** | El gestor de energía/«Autoinicio» puede cerrar el servicio aunque Android lo permita; el bloqueo de la app en «recientes» y «Ahorro de batería: sin restricciones» suelen ser necesarios | Guía en la app (tras probarla en el equipo) y detección de cierre inesperado → la cola persistente la marca *interrumpida* | ❓ el procedimiento exacto depende de la versión de MIUI |
+| **Todas** | El `llama-server` es hijo del proceso de la app: si el proceso muere, muere con él | Al reanudar, el motor lo relanza (ya lo hace) y repite solo la página en curso | ✅ lo segundo ya está probado con piezas simuladas |
+
+### Diseño técnico propuesto (sin implementar)
+
+**Componentes**
+
+1. `ProcessingService` (Java, `ForegroundService`): solo mantiene el **proceso vivo** y muestra la notificación. No contiene
+   lógica de traducción. Adquiere un `PARTIAL_WAKE_LOCK` con tiempo máximo y lo libera al terminar, pausar o cancelar.
+2. Puente Capacitor (`ProcessingPlugin`): `start(title)`, `update({progress, message, page, total, paused})`, `stop(reason)` y
+   eventos hacia el `WebView`: `action` (*pausar*, *reanudar*, *cancelar* desde la notificación) y `timeout` (Android 15).
+3. Orquestador TypeScript (ya existente): al empezar una tarea de procesamiento llama a `start`; al cambiar el progreso llama
+   a `update` (limitado a ~1 por segundo); al terminar/cancelar/fallar llama a `stop`. Las acciones de la notificación se
+   traducen a `pauseJob/resumeJob/cancelJob`.
+4. `WebView` en segundo plano: ❓ **es el punto de mayor riesgo**: hay que comprobar que, con la pantalla apagada y la actividad
+   en segundo plano, siguen ejecutándose JavaScript, los *Workers* de visión y los temporizadores (en Capacitor, `resumeTimers`
+   del `WebView` y el bloqueo parcial de CPU). Si no es fiable → plan C (orquestador nativo) o pausa automática.
+
+**Máquina de estados** (se apoya en la cola persistente de la Fase 4): `idle → starting → running ⇄ paused → stopping → idle`,
+con `interrupted` si el proceso muere. Al reabrir la app, `queue()` muestra lo `interrumpido` y la persona decide retomar.
+
+**Reglas**
+
+- El FGS se arranca **solo** desde una acción visible y se detiene en cuanto no queda trabajo (nunca un servicio «permanente»).
+- La `DeviceStatusGuard` (batería ≤ 10 %, calor, poco espacio, poca memoria) sigue mandando en segundo plano: pausa y actualiza la
+  notificación en lugar de insistir.
+- Una página es la unidad atómica: si el proceso muere, solo se repite la página en curso. Ninguna parada (timeout, cierre del
+  sistema, batería) puede dejar un globo vacío: la regla de integridad de la Fase 3 se aplica igual al reanudar.
+- El progreso de la notificación sale del mismo `RunState` que ve la interfaz (una sola fuente de verdad).
+
+**Riesgos principales:** (1) el `WebView` puede congelarse en segundo plano; (2) límites de tiempo del FGS (Android 15+);
+(3) cierre por el gestor de batería de MIUI; (4) mayor consumo de batería y calor en un procesamiento largo (hay que medirlo);
+(5) la notificación puede ser descartada por la persona (el servicio sigue, pero no hay control visible).
+
+**Plan de pruebas (en dispositivo, lo hace el titular)**: capítulo de ≥ 20 páginas con la pantalla apagada 10 min; app
+enviada a segundo plano; pausa/reanudación/cancelación desde la notificación; matar la app desde «recientes» y reabrir
+(debe mostrarse como interrumpida y retomar sin repetir páginas); batería baja; con y sin permiso de notificaciones; en MIUI con
+y sin «sin restricciones». Registrar versión de Android/MIUI de cada prueba.
+
+**Criterio de «terminado» de la Fase 5:** las pruebas anteriores superadas en el Redmi Note 8 Pro y, al menos, una prueba en
+Android 14 o superior. Hasta entonces: ⏳ diseño.
 
 ## Fase 6: reconstrucción visual
 

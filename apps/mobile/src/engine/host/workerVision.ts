@@ -144,6 +144,18 @@ export class WorkerVision implements VisionPort {
 
   refresh(): void { this.dirty = true; }
 
+  /** Qué motor de lectura se usaría para este idioma (parte de la clave de la caché de OCR). */
+  async fingerprint(lang: string): Promise<string> {
+    const f = await this.flags();
+    return lang === 'ja' && f.manga ? 'manga-ocr' : `ppocr-${lang}`;
+  }
+
+  /** Poca memoria: el worker suelta los modelos grandes opcionales (Manga OCR, LaMa) y los recarga si hacen falta. */
+  async trim(): Promise<void> {
+    if (!this.worker) return;
+    await this.call({ op: 'trim' }).catch(() => undefined);
+  }
+
   async dispose(): Promise<void> {
     this.discard(new CancelledError());
   }

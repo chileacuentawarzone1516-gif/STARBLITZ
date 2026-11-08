@@ -153,6 +153,23 @@ export type PageState =
   'pending' | 'analyzing' | 'analyzed' | 'translating' | 'translated' | 'cleaning' | 'done' | 'error';
 export type RunStatus = 'running' | 'paused' | 'done' | 'error' | 'cancelled' | 'interrupted';
 
+/** Una petición de procesamiento guardada en la cola persistente (sobrevive a cierres de la app). */
+export type QueueState = 'queued' | 'running' | 'interrupted' | 'done' | 'error' | 'cancelled';
+export interface QueueEntry {
+  id: string;
+  project_id: string;
+  stages: ProcessStage[];
+  page_ids: string[] | null;
+  force: boolean;
+  state: QueueState;
+  enqueued: number;
+  started: number | null;
+  finished: number | null;
+  job_id: string | null;
+  error: string;
+  attempts: number;
+}
+
 export interface RunInfo {
   status: RunStatus;
   interrupted: boolean;

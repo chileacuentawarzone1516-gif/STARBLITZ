@@ -7,7 +7,8 @@ import { EventBus, type EngineEvent } from '../../src/engine/core/events';
 import { JobManager } from '../../src/engine/core/jobs';
 import { defaultSettings, mergeSettings } from '../../src/engine/core/settings';
 import { defaultStyle, newProject, newRegion } from '../../src/engine/core/schema';
-import { Processor } from '../../src/engine/pipeline/processor';
+import { createCaches, type PipelineCaches } from '../../src/engine/pipeline/cache';
+import { Processor, type ProcessorDeps } from '../../src/engine/pipeline/processor';
 import type {
   AnalysisResult, AnalyzeInput, DeviceGuard, DeviceProvider, ModelLibrary, ReadRegionInput, VisionPort,
 } from '../../src/engine/pipeline/ports';
@@ -47,6 +48,21 @@ export const fakeRuntime: LlmRuntime = {
 
 export interface FakePage { texts: string[]; fail?: boolean }
 
+/** Mide si la visión y el modelo trabajaron A LA VEZ (solapamiento) y cuántas llamadas simultáneas hubo como máximo. */
+export class OverlapProbe {
+  vision = 0;
+  llm = 0;
+  both = false;
+  maxVision = 0;
+  maxLlm = 0;
+  enter(k: 'vision' | 'llm'): void {
+    this[k] += 1;
+    if (k === 'vision') this.maxVision = Math.max(this.maxVision, this.vision); else this.maxLlm = Math.max(this.maxLlm, this.llm);
+    if (this.vision > 0 && this.llm > 0) this.both = true;
+  }
+  leave(k: 'vision' | 'llm'): void { this[k] -= 1; }
+}
+
 /** Visión simulada: el contenido de la imagen es la clave de la página ("p1"…) y define sus textos. */
 export class FakeVision implements VisionPort {
   analyzed: string[] = [];
@@ -54,7 +70,14 @@ export class FakeVision implements VisionPort {
   detectCalls = 0;
   detectSample = 0;
   lang = 'ja';
+  probe = new OverlapProbe();
+  trims = 0;
+  /** Orden en que ocurrieron los hechos (para comprobar, p. ej., que el modelo no se carga antes que el OCR en serie). */
+  log: string[] = [];
   constructor(public pages: Record<string, FakePage>) {}
+
+  async fingerprint(): Promise<string> { return 'fake-ocr'; }
+  async trim(): Promise<void> { this.trims += 1; this.log.push('trim'); }
 
   private region(key: string, i: number, text: string, order = i): Region {
     return newRegion({
@@ -67,7 +90,9 @@ export class FakeVision implements VisionPort {
   async analyze(input: AnalyzeInput): Promise<AnalysisResult> {
     const key = await input.original.text();
     this.analyzed.push(key);
-    await sleep(2);
+    this.log.push('analyze:' + key);
+    this.probe.enter('vision');
+    try { await sleep(2); } finally { this.probe.leave('vision'); }
     const page = this.pages[key];
     if (!page || page.fail) throw new Error('imagen dañada');
     return { regions: page.texts.map((t, i) => this.region(key, i, t)), panels: [[0, 0, 200, 300]], ocrEngine: 'fake', mask: enc('mask:' + key) };
@@ -110,6 +135,10 @@ export interface LlmCall { system: string; user: string; images: number; kind: '
 export class FakeLlm extends LLMClient {
   calls: LlmCall[] = [];
   healthy = true;
+  probe = new OverlapProbe();
+  log: string[] | null = null;
+  warmed = 0;
+  async warmUp(): Promise<void> { this.warmed += 1; this.log?.push('warm'); }
   refuse: (text: string) => boolean = () => false;
   hook: ((call: LlmCall) => Promise<void> | void) | null = null;
   constructor() { super({ temperature: 0.3, timeout_s: 60, use_vision: true }); }
@@ -119,8 +148,11 @@ export class FakeLlm extends LLMClient {
     const kind = 'new_terms' in (schema as { properties: object }).properties ? 'translate' : 'review';
     const call: LlmCall = { system: messages[0].content, user: user.content, images: user.images?.length ?? 0, kind };
     this.calls.push(call);
-    await sleep(2);
-    await this.hook?.(call);
+    this.probe.enter('llm');
+    try {
+      await sleep(2);
+      await this.hook?.(call);
+    } finally { this.probe.leave('llm'); }
     if (kind === 'review') return JSON.stringify({ items: [] });
     const items: object[] = [];
     for (const line of user.content.split('\n')) {
@@ -148,23 +180,32 @@ export interface Env {
   settings: Settings;
   processor: Processor;
   events: EngineEvent[];
+  caches: PipelineCaches;
+  probe: OverlapProbe;
 }
 
 export function makeEnv(pages: Record<string, FakePage>, patch: Parameters<typeof mergeSettings>[1] = {}, guard?: DeviceGuard,
-                        fits?: (r: Region, p: Page) => boolean): Env {
-  const storage = new MemoryStorage();
+                        fits?: (r: Region, p: Page) => boolean, extra: Partial<ProcessorDeps> & { storage?: MemoryStorage; ramGb?: number } = {}): Env {
+  const storage = extra.storage ?? new MemoryStorage();
   const store = new ProjectStore(storage, async (b) => b);
   const bus = new EventBus();
   const events: EngineEvent[] = [];
   bus.subscribe((e) => events.push(e));
   const vision = new FakeVision(pages);
   const llm = new FakeLlm();
+  const probe = new OverlapProbe();
+  vision.probe = probe;
+  llm.probe = probe;
+  llm.log = vision.log;
+  const caches = extra.caches ?? createCaches(storage);
   const library = new FakeLibrary();
   const env = { settings: mergeSettings(defaultSettings(), patch) } as Env;
   const processor = new Processor({
     store, bus, vision, settings: () => env.settings, device: new FakeDevice(), library, runtime: fakeRuntime, clientFactory: () => llm, guard, fits,
+    caches, concurrency: extra.concurrency,
+    ...(extra.ramGb ? { device: new FakeDevice({ ram_gb: extra.ramGb, vram_gb: 0, gpu: '', cpu: 'arm64', threads: 8 }) } : {}),
   });
-  return Object.assign(env, { storage, store, bus, jobs: new JobManager(bus), vision, llm, library, processor, events });
+  return Object.assign(env, { storage, store, bus, jobs: new JobManager(bus), vision, llm, library, processor, events, caches, probe });
 }
 
 /** Crea un proyecto con una página por cada clave (el contenido de la imagen es la clave). */

@@ -11,7 +11,7 @@ import {
 } from '@starblitz/shared';
 import type {
   BBox, DeepPartial, DeviceCaps, HFRepoInfo, HFSearchResult, InstalledModel, Job, LLMOverview, LLMSummary, ModelsInfo, Page, ProcessStage, Project,
-  ProjectBundle, ProjectSummary, Region, RunInfo, RuntimeStatus, Settings, SystemInfo,
+  ProjectBundle, ProjectSummary, QueueEntry, Region, RunInfo, RuntimeStatus, Settings, SystemInfo,
 } from '@starblitz/shared';
 import { AppError, NotFoundError, ValidationError } from '../core/errors';
 import { EventBus, type EngineEvent } from '../core/events';
@@ -26,7 +26,9 @@ import { blobSource } from '../importers/zip';
 import { compareModels, makeProbe } from '../llm/benchmark';
 import { LlmLibrary, toInstalled } from '../models/library';
 import type { VisionModelManager } from '../models/vision';
+import type { PipelineCaches } from '../pipeline/cache';
 import { Processor, STAGES, type ProcessorDeps } from '../pipeline/processor';
+import { ProcessQueue } from '../pipeline/queue';
 import type { DeviceProvider, VisionPort } from '../pipeline/ports';
 import { describeRun, type RunData } from '../pipeline/runstate';
 import type { DocStorage } from '../store/docs';
@@ -61,6 +63,10 @@ export interface LocalEngineDeps {
   guard?: ProcessorDeps['guard'];
   /** Validación de que la traducción cabe en su globo (necesita lienzo y tipografías: la aporta la interfaz). */
   fits?: ProcessorDeps['fits'];
+  /** Cachés de OCR y traducciones (si se omiten, el motor no reutiliza resultados). */
+  caches?: PipelineCaches;
+  /** Política de concurrencia (pruebas). */
+  concurrency?: ProcessorDeps['concurrency'];
 }
 
 export interface StorageInfo {
@@ -83,6 +89,8 @@ export class LocalEngine {
   readonly jobs = new JobManager(this.bus);
   readonly store: ProjectStore;
   readonly processor: Processor;
+  private readonly processQueue: ProcessQueue;
+  private closing = false;
   private settings: Settings = defaultSettings();
   private listeners = new Map<number, () => void>();
   private nextListener = 1;
@@ -91,8 +99,11 @@ export class LocalEngine {
     this.store = new ProjectStore(d.storage, d.thumbs);
     this.processor = new Processor({
       store: this.store, bus: this.bus, vision: d.vision, settings: () => this.settings, device: d.device, library: d.library, runtime: d.runtime,
-      clientFactory: d.clientFactory, guard: d.guard, fits: d.fits,
+      clientFactory: d.clientFactory, guard: d.guard, fits: d.fits, caches: d.caches, concurrency: d.concurrency,
     });
+    this.processQueue = new ProcessQueue(d.storage);
+    // La cola persistente sigue el estado real de cada tarea de procesamiento (incluida la cancelada antes de empezar).
+    this.bus.subscribe((e) => { if (e.type === 'job') void this.syncQueue(e.job).catch((err) => console.warn('No se pudo actualizar la cola', err)); });
   }
 
   static async create(deps: LocalEngineDeps): Promise<LocalEngine> {
@@ -103,6 +114,9 @@ export class LocalEngine {
 
   async init(): Promise<void> {
     this.settings = loadSettings(await this.d.storage.getDoc('settings/main'));
+    // Lo que quedó en cola o en ejecución cuando la app se cerró pasa a «interrumpido»; los proyectos borrados se descartan.
+    await this.processQueue.load();
+    await this.processQueue.dropProjects(async (id) => this.store.get(id).then(() => true, () => false));
   }
 
   // -- sistema -------------------------------------------------------------------------------------
@@ -481,8 +495,64 @@ export class LocalEngine {
     if (!stages.length) throw new ValidationError('invalid_stages', 'Indica al menos una etapa válida.');
     if (this.jobs.activeFor(pid)) throw new AppError('busy', 'Este proyecto ya se está procesando.', 409);
     await this.store.get(pid);
-    const title = opts.resume ? 'Reanudando proyecto' : 'Procesando proyecto';
-    return this.jobs.submit('process', title, (ctx) => this.processor.run(ctx, pid, stages, opts.page_ids, !!opts.force), { projectId: pid, pausable: true });
+    // Una petición nueva sustituye a la interrumpida del mismo proyecto (el progreso por página lo conserva RunState).
+    const old = this.processQueue.activeFor(pid);
+    const attempts = old?.attempts ?? 0;
+    if (old?.state === 'interrupted') await this.processQueue.remove(old.id);
+    const entry = await this.processQueue.enqueue({ project_id: pid, stages: stages as ProcessStage[], page_ids: opts.page_ids ?? null, force: opts.force });
+    return this.launch(entry, !!opts.resume, attempts);
+  }
+
+  private async launch(entry: QueueEntry, resume: boolean, attempts: number): Promise<Job> {
+    const title = resume ? 'Reanudando proyecto' : 'Procesando proyecto';
+    try {
+      const job = this.jobs.submit('process', title,
+        (ctx) => this.processor.run(ctx, entry.project_id, entry.stages, entry.page_ids ?? undefined, entry.force),
+        { projectId: entry.project_id, pausable: true });
+      await this.processQueue.mark(entry.id, { job_id: job.id, attempts: attempts + 1 });
+      return job;
+    } catch (e) {
+      await this.processQueue.remove(entry.id);
+      throw e;
+    }
+  }
+
+  private async syncQueue(job: Job): Promise<void> {
+    if (job.kind !== 'process' || this.closing) return; // al cerrar la app, lo pendiente debe quedar «en ejecución» para pasar a «interrumpido»
+    const entry = this.processQueue.list().find((e) => e.job_id === job.id);
+    if (!entry) return;
+    const state = job.status === 'queued' ? 'queued' : job.status === 'running' || job.status === 'paused' ? 'running' : job.status === 'done' ? 'done' : job.status === 'cancelled' ? 'cancelled' : 'error';
+    if (entry.state === state) return;
+    const finished = state === 'done' || state === 'cancelled' || state === 'error';
+    await this.processQueue.mark(entry.id, {
+      state, started: entry.started ?? (state === 'running' ? now() : null), finished: finished ? now() : null, error: state === 'error' ? job.error : '',
+    });
+  }
+
+  /** Peticiones guardadas: pendientes (interrumpidas o en cola), en ejecución y las últimas terminadas. */
+  queue(): Promise<QueueEntry[]> { return Promise.resolve(this.processQueue.list()); }
+
+  /** Retoma las peticiones interrumpidas por un cierre de la app, en el orden en que se pidieron. El progreso por página se conserva. */
+  async resumeQueue(): Promise<Job[]> {
+    const jobs: Job[] = [];
+    for (const e of this.processQueue.pending()) {
+      try {
+        jobs.push(await this.process(e.project_id, { stages: e.stages, page_ids: e.page_ids ?? undefined, force: e.force, resume: true }));
+      } catch (err) {
+        console.warn(`No se pudo retomar el proyecto ${e.project_id}`, err);
+        await this.processQueue.mark(e.id, { state: 'error', error: err instanceof Error ? err.message : 'No se pudo retomar.', finished: now() });
+      }
+    }
+    return jobs;
+  }
+
+  /** Descarta una petición interrumpida (no se retomará). */
+  async dismissQueue(id: string): Promise<{ ok: true }> {
+    const e = this.processQueue.list().find((x) => x.id === id);
+    if (!e) throw new NotFoundError('la petición');
+    if (e.state === 'running' || e.state === 'queued') throw new AppError('busy', 'Esa petición sigue en curso: cancélala desde la tarea.', 409);
+    await this.processQueue.remove(id);
+    return { ok: true };
   }
 
   async run(pid: string): Promise<RunInfo | null> {
@@ -490,6 +560,7 @@ export class LocalEngine {
   }
 
   async dispose(): Promise<void> {
+    this.closing = true; // el cierre no es una cancelación de la persona: la cola conserva lo pendiente
     for (const j of this.jobs.list()) if (['queued', 'running', 'paused'].includes(j.status)) this.jobs.cancel(j.id);
     await this.d.vision.dispose?.();
   }

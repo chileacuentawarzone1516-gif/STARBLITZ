@@ -321,6 +321,96 @@ describe('motor local del teléfono', () => {
     expect(bundle.pages[0].regions[0].translation).toBe('ES(おはよう)');
   });
 
+  /** Espera a que la cola refleje un estado (se actualiza por eventos, un instante después de que cambie la tarea). */
+  async function queueSettled(e: LocalEngine, until: (q: Awaited<ReturnType<LocalEngine['queue']>>) => boolean, ms = 3000) {
+    const t0 = Date.now();
+    for (;;) {
+      const q = await e.queue();
+      if (until(q)) return q;
+      if (Date.now() - t0 > ms) throw new Error('La cola no llegó al estado esperado: ' + JSON.stringify(q.map((x) => [x.project_id, x.state])));
+      await sleep(5);
+    }
+  }
+
+  it('cola persistente: tras un cierre brusco, la tarea en curso y la que esperaba quedan interrumpidas y «retomar» las completa EN ORDEN', async () => {
+    const storage = new FreezableStorage(new MemoryStorage());
+    const files = new NodeFiles();
+    const a = await rig({ storage, files });
+    const p1 = await seeded(a);
+    const p2 = await seeded(a);
+    let calls = 0;
+    a.llm.hook = (c) => { if (c.kind === 'translate' && ++calls === 2) { storage.frozen = true; void a.engine.dispose(); } };
+    await a.engine.process(p1);
+    await a.engine.process(p2);                                   // queda esperando detrás de la primera
+    await sleep(200);
+    expect((await a.engine.queue()).map((e) => e.state)).toEqual(['running', 'queued']);
+
+    // Segunda ejecución de la app con lo que llegó a disco
+    const b = await rig({ storage: storage.inner, files });
+    const q = await b.engine.queue();
+    expect(q.map((e) => [e.project_id, e.state, e.job_id])).toEqual([[p1, 'interrupted', null], [p2, 'interrupted', null]]);
+    const doneBefore = (await b.engine.run(p1))!.counts.done;
+    expect(doneBefore).toBeLessThan(4);
+
+    const jobs = await b.engine.resumeQueue();
+    expect(jobs).toHaveLength(2);
+    for (const j of jobs) expect((await wait(b.engine, j.id)).status).toBe('done');
+    for (const pid of [p1, p2]) expect((await b.engine.project(pid)).pages.every((g) => g.status === 'cleaned')).toBe(true);
+    const settled = await queueSettled(b.engine, (x) => x.every((e) => e.state === 'done'));
+    expect(settled.map((e) => e.project_id)).toEqual([p1, p2]);   // se conserva el orden en que se pidieron
+    expect(settled[0].attempts).toBeGreaterThanOrEqual(2);        // se registra que fue un reintento
+    expect(b.vision.analyzed.length).toBeLessThanOrEqual((4 - doneBefore) + 4 + 1); // lo ya hecho no se rehizo
+    expect((await b.engine.resumeQueue())).toHaveLength(0);       // nada más pendiente
+  });
+
+  it('cola persistente: cancelar la tarea (también si aún no había empezado) NO la deja pendiente', async () => {
+    const r = await rig();
+    const p1 = await seeded(r);
+    const p2 = await seeded(r);
+    r.llm.hook = async () => { await sleep(20); };
+    const j1 = await r.engine.process(p1);
+    const j2 = await r.engine.process(p2);                        // en cola
+    await r.engine.cancelJob(j2.id);
+    await r.engine.cancelJob(j1.id);
+    await wait(r.engine, j1.id);
+    const q = await queueSettled(r.engine, (x) => x.length === 2 && x.every((e) => e.state === 'cancelled'));
+    expect(q.every((e) => e.finished !== null)).toBe(true);
+    expect(await r.engine.resumeQueue()).toHaveLength(0);
+  });
+
+  it('cola persistente: un fallo queda registrado con su motivo; una petición duplicada no crea otra entrada', async () => {
+    const r = await rig();
+    const pid = await seeded(r);
+    r.llm.healthy = false;
+    const job = await r.engine.process(pid);
+    await expect(r.engine.process(pid)).rejects.toMatchObject({ status: 409 });   // ya se está procesando
+    expect(await r.engine.queue()).toHaveLength(1);
+    expect((await wait(r.engine, job.id)).status).toBe('error');
+    const q = await queueSettled(r.engine, (x) => x[0]?.state === 'error');
+    expect(q[0].error).not.toBe('');
+  });
+
+  it('cola persistente: se puede descartar una petición interrumpida, pero no una en curso; los proyectos borrados desaparecen', async () => {
+    const storage = new FreezableStorage(new MemoryStorage());
+    const files = new NodeFiles();
+    const a = await rig({ storage, files });
+    const pid = await seeded(a);
+    const keep = await seeded(a);
+    a.llm.hook = (c) => { if (c.kind === 'translate') { storage.frozen = true; void a.engine.dispose(); } };
+    await a.engine.process(pid);
+    await a.engine.process(keep);
+    await sleep(150);
+
+    const b = await rig({ storage: storage.inner, files });
+    const [first] = await b.engine.queue();
+    await b.engine.deleteProject(keep);                           // el proyecto se borra mientras su petición está pendiente
+    const c = await rig({ storage: storage.inner, files });       // al reabrir, esa entrada ya no existe
+    expect((await c.engine.queue()).map((e) => e.project_id)).toEqual([pid]);
+    await c.engine.dismissQueue(first.id);
+    expect(await c.engine.queue()).toHaveLength(0);
+    await expect(c.engine.dismissQueue('q_inexistente')).rejects.toMatchObject({ status: 404 });
+  });
+
   it('una página dañada no detiene la obra y se puede reintentar sola', async () => {
     const r = await rig({ book: { ...BOOK, p2: { texts: ['x'], fail: true } } });
     const pid = await seeded(r);

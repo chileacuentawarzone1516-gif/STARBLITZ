@@ -13,6 +13,13 @@ las pruebas de [docs/PRUEBAS-HARDWARE.md](docs/PRUEBAS-HARDWARE.md).
 
 ### Añadido
 
+- **Rendimiento y lotes (móvil, Fase 4):** cola persistente de procesamiento con recuperación tras un cierre (`queue()`,
+  `resumeQueue()`, `dismissQueue()`); caché de OCR y de traducciones con claves que incluyen todo el contexto (nunca se
+  reutiliza un resultado vacío, rechazado o con otro contexto; «forzar» las salta); gobernador de concurrencia por RAM y memoria
+  libre (serie por defecto); precarga del modelo sin competir con el OCR; liberación de modelos opcionales de la visión con
+  poca memoria; medidas por página y por capítulo en `last_job.timings`. Probado con piezas simuladas (195 pruebas móviles);
+  **sin mediciones de tiempo real ni mejoras de velocidad afirmadas**.
+
 - **STARBLITZ Desktop** (Windows 10/11 x64): aplicación Electron + React con motor propio en Python (FastAPI, ONNX Runtime
   con DirectML, llama.cpp con Vulkan), proyectos, procesamiento por lotes, editor, exportación y gestor de modelos.
 - **STARBLITZ Mobile** (Android 9+, arm64): aplicación Capacitor con motor local en TypeScript, plugin nativo en Java y

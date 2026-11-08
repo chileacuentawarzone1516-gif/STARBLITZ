@@ -29,6 +29,7 @@ export type VisionCall =
   | { op: 'clean'; original: Blob; mask: Blob | null; regions: Region[] }
   | { op: 'annotate'; original: Blob; boxes: BBox[] }
   | { op: 'readRegion'; input: ReadRegionInput }
+  | { op: 'trim' }
   | { op: 'dispose' };
 
 export type VisionRequest =
@@ -44,5 +45,5 @@ export type VisionReply =
   | { op: 'needPage'; callId: number; index: number };
 
 export type VisionResult = {
-  configure: void; analyze: AnalysisResult; detectLanguage: string; clean: Blob; annotate: Uint8Array; readRegion: Region; dispose: void;
+  configure: void; analyze: AnalysisResult; detectLanguage: string; clean: Blob; annotate: Uint8Array; readRegion: Region; trim: void; dispose: void;
 };

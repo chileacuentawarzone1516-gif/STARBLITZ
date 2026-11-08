@@ -21,6 +21,8 @@ import { ContextualTranslator, isRefusal, mergeMemory } from '../translate/conte
 import { createClient, type ClientConfig, type LLMClient } from '../translate/llm';
 import type { LlmRuntime } from '../translate/runtime';
 import type { DeviceGuard, DeviceProvider, ModelLibrary, VisionPort } from './ports';
+import { analysisKey, type CachedAnalysis, type PipelineCaches } from './cache';
+import { planConcurrency, type ConcurrencyPlan, type ConcurrencyPolicy } from './governor';
 import { RunState, STAGE_WEIGHT } from './runstate';
 
 export const STAGES = ['analyze', 'translate', 'clean'] as const;
@@ -43,6 +45,10 @@ export interface ProcessorDeps {
    * Si no se indica, no se valida el ajuste (pruebas, Node).
    */
   fits?: (region: Region, page: Page) => boolean;
+  /** Cachés de OCR y de traducciones (si se omiten, no se usan). */
+  caches?: PipelineCaches;
+  /** Política de concurrencia (por defecto, según RAM y memoria libre). Para pruebas. */
+  concurrency?: ConcurrencyPolicy;
 }
 
 interface Stats {
@@ -54,18 +60,41 @@ interface Stats {
   timings?: TimingSummary;
 }
 
-export interface PageTiming { page: number; analyze_s: number; translate_s: number; clean_s: number; regions: number; preserved: number; llm_tps: number }
-export interface TimingSummary { analyze_s: number; translate_s: number; clean_s: number; pages: PageTiming[] }
+export interface PageTiming {
+  page: number; analyze_s: number; translate_s: number; clean_s: number; regions: number; preserved: number; llm_tps: number;
+  /** El análisis salió de la caché de OCR. */
+  ocr_cached: boolean;
+  /** Llamadas reales al modelo de esta página y respuestas servidas desde la caché. */
+  llm_calls: number; tr_cache_hits: number;
+}
+/** Medidas del capítulo completo (todas en segundos salvo que se indique). */
+export interface ChapterStats {
+  total_s: number; model_load_s: number; queue_wait_s: number;
+  llm_calls: number; translate_cache_hits: number; ocr_cache_hits: number; ocr_cache_misses: number;
+  /** Páginas cuyo análisis se solapó con la traducción de la anterior. */
+  overlapped_pages: number;
+  /** Veces que se soltaron los modelos opcionales por poca memoria. */
+  trims: number;
+  /** Mínimo de memoria libre observada (MB), si el dispositivo la informa. */
+  min_free_mb: number | null;
+  /** Última decisión del gobernador de concurrencia. */
+  plan: string;
+}
+export interface TimingSummary { analyze_s: number; translate_s: number; clean_s: number; pages: PageTiming[]; chapter: ChapterStats }
 
 /** Acumula el tiempo de cada etapa por página durante una ejecución. */
 export class RunTiming {
+  readonly chapter: ChapterStats = {
+    total_s: 0, model_load_s: 0, queue_wait_s: 0, llm_calls: 0, translate_cache_hits: 0, ocr_cache_hits: 0, ocr_cache_misses: 0,
+    overlapped_pages: 0, trims: 0, min_free_mb: null, plan: '',
+  };
   private pages = new Map<string, PageTiming>();
   private at(pid: string, index: number): PageTiming {
     let p = this.pages.get(pid);
-    if (!p) { p = { page: index + 1, analyze_s: 0, translate_s: 0, clean_s: 0, regions: 0, preserved: 0, llm_tps: 0 }; this.pages.set(pid, p); }
+    if (!p) { p = { page: index + 1, analyze_s: 0, translate_s: 0, clean_s: 0, regions: 0, preserved: 0, llm_tps: 0, ocr_cached: false, llm_calls: 0, tr_cache_hits: 0 }; this.pages.set(pid, p); }
     return p;
   }
-  add(pid: string, index: number, stage: 'analyze' | 'translate' | 'clean', ms: number, extra: Partial<Pick<PageTiming, 'regions' | 'preserved' | 'llm_tps'>> = {}): void {
+  add(pid: string, index: number, stage: 'analyze' | 'translate' | 'clean', ms: number, extra: Partial<Pick<PageTiming, 'regions' | 'preserved' | 'llm_tps' | 'ocr_cached' | 'llm_calls' | 'tr_cache_hits'>> = {}): void {
     const p = this.at(pid, index);
     p[`${stage}_s` as 'analyze_s'] += ms / 1000;
     Object.assign(p, extra);
@@ -74,7 +103,11 @@ export class RunTiming {
     const r1 = (n: number) => Math.round(n * 10) / 10;
     const pages = [...this.pages.values()].sort((a, b) => a.page - b.page).map((p) => ({ ...p, analyze_s: r1(p.analyze_s), translate_s: r1(p.translate_s), clean_s: r1(p.clean_s) }));
     const sum = (k: 'analyze_s' | 'translate_s' | 'clean_s') => r1(pages.reduce((n, p) => n + p[k], 0));
-    return { analyze_s: sum('analyze_s'), translate_s: sum('translate_s'), clean_s: sum('clean_s'), pages };
+    const c = this.chapter;
+    return {
+      analyze_s: sum('analyze_s'), translate_s: sum('translate_s'), clean_s: sum('clean_s'), pages,
+      chapter: { ...c, total_s: r1(c.total_s), model_load_s: r1(c.model_load_s), queue_wait_s: r1(c.queue_wait_s) },
+    };
   }
 }
 
@@ -107,6 +140,10 @@ export function planClean(page: Page, fits?: (r: Region, p: Page) => boolean): C
 
 export class Processor {
   private timing = new RunTiming();
+  /** Estado de la ejecución en curso (las tareas de cómputo se ejecutan de una en una). */
+  private runVision: boolean | null = null;
+  private useOcrCache = false;
+  private lastAnalysisCached = false;
   constructor(private d: ProcessorDeps) {}
 
   // -- recursos -----------------------------------------------------------
@@ -149,13 +186,35 @@ export class Processor {
   }
 
   /** Traductor con un modelo concreto; `quality` fuerza la calidad (la comparación de modelos usa «balanced»). */
-  async translatorFor(model: string, quality?: 'balanced' | 'max'): Promise<ContextualTranslator> {
+  async translatorFor(model: string, quality?: 'balanced' | 'max', opts: { cache?: boolean } = {}): Promise<ContextualTranslator> {
     const s = this.d.settings();
     const profile = await this.profile();
     const chosen = quality ?? (s.translation.quality === 'auto' ? profile.quality : s.translation.quality);
     const cfg: ClientConfig = { provider: s.llm.provider, base_url: s.llm.base_url, api_key: s.llm.api_key, temperature: s.llm.temperature, timeout_s: s.llm.timeout_s, use_vision: s.llm.use_vision };
     const client = (this.d.clientFactory ?? createClient)(cfg, this.d.runtime);
-    return new ContextualTranslator(client, model, { ...s.translation, quality: chosen });
+    const salt = JSON.stringify([s.llm.provider, s.llm.temperature, s.llm.use_vision, chosen]);
+    return new ContextualTranslator(client, model, { ...s.translation, quality: chosen }, { cache: opts.cache ? this.d.caches?.translation : undefined, salt });
+  }
+
+  /** Decisión de concurrencia del momento (RAM del dispositivo y memoria libre); con poca memoria suelta los modelos opcionales. */
+  private async plan(): Promise<ConcurrencyPlan> {
+    const mem = await this.d.guard?.memory?.().catch(() => null) ?? null;
+    if (mem) {
+      const c = this.timing.chapter;
+      c.min_free_mb = c.min_free_mb === null ? mem.free_mb : Math.min(c.min_free_mb, mem.free_mb);
+      if (mem.low) await this.trim();
+    }
+    const plan = this.d.concurrency ? await this.d.concurrency()
+      : planConcurrency({ mobile: this.d.device.mobile, ramGb: (await this.d.device.caps()).ram_gb, freeMb: mem?.free_mb ?? null, lowMemory: !!mem?.low });
+    this.timing.chapter.plan = plan.reason;
+    return plan;
+  }
+
+  /** Poca memoria: la visión suelta los modelos grandes opcionales (se recargan solos si hacen falta). */
+  private async trim(): Promise<void> {
+    if (!this.d.vision.trim) return;
+    this.timing.chapter.trims += 1;
+    await this.d.vision.trim().catch((e) => console.warn('No se pudo liberar memoria de la visión', e));
   }
 
   // -- ejecución completa -------------------------------------------------
@@ -176,9 +235,12 @@ export class Processor {
     await run.begin([...active], ids, initial, force, ctx.job.id);
     const totalUnits = ids.length * full;
     const preUnits = ids.reduce((n, pid) => n + full - sumWeights(todo.get(pid)!), 0);
-    const progress = new Progress(ctx, run, totalUnits, preUnits, totalUnits - preUnits, this.d.guard);
+    const progress = new Progress(ctx, run, totalUnits, preUnits, totalUnits - preUnits, this.d.guard, () => this.trim());
     const stats: Stats = { pages: ids.length, pages_with_work: [...todo.values()].filter((t) => t.length).length, lines: 0, review: 0, refused: 0, edited_by_reviewer: 0, errors: 0, model: '', preserved: 0 };
     this.timing = new RunTiming();
+    this.timing.chapter.queue_wait_s = Math.max(0, Date.now() / 1000 - ctx.job.created);
+    this.useOcrCache = !force && !!this.d.caches;
+    this.runVision = null;
     const started = performance.now();
     let translator: ContextualTranslator | null = null;
     try {
@@ -191,12 +253,24 @@ export class Processor {
       } else {
         run.setLanguage(effectiveLang(project));
       }
+      let plan = await this.plan();
+      let warm: Promise<void> | null = null;
+      /** Carga el modelo (una sola vez). Solo se solapa con el OCR si el gobernador lo permite: en un teléfono con poca RAM la carga espera a que la visión esté libre. */
+      const startWarm = (): Promise<void> => {
+        warm ??= (async () => {
+          const t0 = performance.now();
+          try { await translator!.client.warmUp(translator!.model, ctx.signal); }
+          catch (e) { console.info('Precarga del modelo no completada:', e instanceof Error ? e.message : e); }
+          this.timing.chapter.model_load_s += (performance.now() - t0) / 1000;
+        })();
+        return warm;
+      };
       if (active.includes('translate') && [...todo.values()].some((t) => t.includes('translate'))) {
-        translator = await this.translator();
+        translator = await this.translatorFor(await this.llmModel(), undefined, { cache: !force });
         stats.model = translator.model;
         if (!(await translator.client.health()).ok) throw new LLMUnavailableError(unavailableMessage(this.d.settings().llm.provider));
-        // El modelo se carga en segundo plano mientras la visión analiza las primeras páginas.
-        translator.client.warmUp(translator.model, ctx.signal).catch((e) => console.info('Precarga del modelo no completada:', e instanceof Error ? e.message : e));
+        this.runVision = await this.useVision(); // se decide una vez por tarea, no página a página
+        if (plan.overlap) void startWarm();
       }
       const story = new Map<string, string>(); // memoria narrativa: resúmenes de lo ya traducido, también de páginas fuera de esta tarea
       for (const p of allIds) {
@@ -217,6 +291,7 @@ export class Processor {
         const need = todo.get(pid)!;
         if (!need.length) continue;
         await progress.checkpoint();
+        plan = await this.plan(); // la memoria libre cambia mientras se trabaja
         const idx = allIds.indexOf(pid);
         const label = `Página ${idx + 1}`;
         try {
@@ -228,11 +303,25 @@ export class Processor {
             continue;
           }
           if (need.includes('translate')) {
-            if (active.includes('analyze')) await analyzeAhead(pid);
-            await this.stepTranslate(ctx, progress, run, translator, projectId, pid, story, stats, label);
+            if (translator) await startWarm(); // en serie, el modelo se carga con la visión parada (la página ya está analizada)
+            let ahead: Promise<void> | null = null;
+            if (active.includes('analyze')) {
+              if (plan.overlap) {
+                this.timing.chapter.overlapped_pages += 1;
+                ahead = analyzeAhead(pid); // con RAM de sobra, la página siguiente se analiza mientras el modelo traduce esta
+                ahead.catch(() => undefined);
+              } else {
+                await analyzeAhead(pid);
+              }
+            }
+            let failure: unknown = null;
+            try { await this.stepTranslate(ctx, progress, run, translator, projectId, pid, story, stats, label); } catch (e) { failure = e; }
+            if (ahead) { try { await ahead; } catch (e) { failure ??= e; } } // nunca queda trabajo suelto antes de reconstruir
+            if (failure) throw failure;
           }
           if (need.includes('clean')) stats.preserved += await this.stepClean(ctx, progress, run, projectId, pid, label);
           run.setPage(pid, 'done');
+          pages.delete(pid); // la página terminada no se vuelve a necesitar en memoria
           progress.pageFinished(pid, need);
         } catch (e) {
           if (e instanceof CancelledError || e instanceof ModelMissingError || e instanceof LLMUnavailableError) throw e;
@@ -246,6 +335,11 @@ export class Processor {
       }
 
       stats.seconds = Math.round((performance.now() - started) / 100) / 10;
+      this.timing.chapter.total_s = (performance.now() - started) / 1000;
+      if (translator) {
+        this.timing.chapter.llm_calls = translator.stats.llm_calls;
+        this.timing.chapter.translate_cache_hits = translator.stats.cache_hits;
+      }
       stats.timings = this.timing.summary();
       const counts = run.counts();
       stats.done_pages = counts.done;
@@ -265,6 +359,9 @@ export class Processor {
       }
       await run.finish('error', e instanceof AppError ? e.message : 'Error interno inesperado.');
       throw e;
+    } finally {
+      this.runVision = null;
+      this.useOcrCache = false;
     }
   }
 
@@ -277,8 +374,8 @@ export class Processor {
     const page = await this.d.store.getPage(projectId, pid);
     const t0 = performance.now();
     try {
-      const analyzed = await this.analyzePage(project, page, ctx.signal);
-      this.timing.add(pid, page.index, 'analyze', performance.now() - t0, { regions: analyzed.regions.length });
+      const analyzed = await this.analyzePage(project, page, ctx.signal, this.useOcrCache);
+      this.timing.add(pid, page.index, 'analyze', performance.now() - t0, { regions: analyzed.regions.length, ocr_cached: this.lastAnalysisCached });
     } catch (e) {
       if (e instanceof ModelMissingError || e instanceof CancelledError) throw e;
       console.error(`Error analizando ${label}`, e);
@@ -299,6 +396,7 @@ export class Processor {
     run.setPage(pid, 'translating');
     progress.message(pid, 'translate', `${label} · traduciendo`);
     const tStart = performance.now();
+    const before = { ...translator.stats };
     const project = await store.get(projectId);
     const allIds = project.page_ids;
     const idx = allIds.indexOf(pid);
@@ -307,7 +405,7 @@ export class Processor {
     const nextPage = idx + 1 < allIds.length ? await store.getPage(projectId, allIds[idx + 1]) : null;
     if (page.regions.length) {
       let image: Uint8Array | null = null;
-      if (await this.useVision()) {
+      if (this.runVision ?? await this.useVision()) {
         image = await this.d.vision.annotate((await store.image(projectId, pid, 'original'))!, page.regions.map((r) => r.bbox));
       }
       const earlier = allIds.slice(0, idx).filter((p) => story.has(p)).map((p) => story.get(p)!);
@@ -338,7 +436,9 @@ export class Processor {
       });
     }
     const llmStats = (translator.client as { lastStats?: { tps?: number } }).lastStats;
-    this.timing.add(pid, page.index, 'translate', performance.now() - tStart, { llm_tps: llmStats?.tps ?? 0 });
+    this.timing.add(pid, page.index, 'translate', performance.now() - tStart, {
+      llm_tps: llmStats?.tps ?? 0, llm_calls: translator.stats.llm_calls - before.llm_calls, tr_cache_hits: translator.stats.cache_hits - before.cache_hits,
+    });
     run.setPage(pid, 'translated');
     progress.stepDone('translate', pid);
   }
@@ -387,12 +487,36 @@ export class Processor {
   }
 
   // -- etapa 1: análisis ----------------------------------------------------
-  async analyzePage(project: Project, page: Page, signal?: AbortSignal): Promise<Page> {
+  async analyzePage(project: Project, page: Page, signal?: AbortSignal, useCache = false): Promise<Page> {
     const { store } = this.d;
-    const original = await mustImage(store, project.id, page.id, 'original');
-    const res = await this.d.vision.analyze({
-      original, lang: effectiveLang(project), direction: project.reading_direction, sfx: project.sfx, pageHeight: page.height,
-    }, signal);
+    const lang = effectiveLang(project);
+    const caches = this.d.caches;
+    const key = caches && page.sha1 ? analysisKey({
+      sha1: page.sha1, lang, direction: project.reading_direction, sfx: project.sfx, height: page.height,
+      engine: (await this.d.vision.fingerprint?.(lang)) ?? 'default',
+    }) : '';
+    this.lastAnalysisCached = false;
+    let res: { regions: Region[]; panels: BBox[]; ocrEngine: string; mask: Blob } | null = null;
+    if (useCache && caches && key) {
+      const hit = await caches.ocr.get<CachedAnalysis>(key);
+      const mask = hit ? await caches.ocr.getBlob(key) : undefined;
+      if (hit && mask && hit.regions.every((r) => typeof r.id === 'string')) {
+        res = { regions: structuredClone(hit.regions), panels: hit.panels, ocrEngine: hit.ocrEngine, mask };
+        this.lastAnalysisCached = true;
+        this.timing.chapter.ocr_cache_hits += 1;
+      }
+    }
+    if (!res) {
+      const original = await mustImage(store, project.id, page.id, 'original');
+      res = await this.d.vision.analyze({
+        original, lang, direction: project.reading_direction, sfx: project.sfx, pageHeight: page.height,
+      }, signal);
+      if (caches && key) {
+        this.timing.chapter.ocr_cache_misses += 1;
+        await caches.ocr.putBlob(key, res.mask).catch(() => undefined);
+        await caches.ocr.put(key, { regions: res.regions, panels: res.panels, ocrEngine: res.ocrEngine } satisfies CachedAnalysis);
+      }
+    }
     // Se conservan los textos que la persona ya revisó si siguen en el mismo sitio.
     const keep = page.regions.filter((r) => r.status === 'approved' || r.status === 'edited');
     for (const r of res.regions) {
@@ -556,7 +680,8 @@ export class Progress {
   private total: number;
   private work: number;
 
-  constructor(private ctx: JobContext, private run: RunState, total: number, private pre: number, work: number, private guard?: DeviceGuard) {
+  constructor(private ctx: JobContext, private run: RunState, total: number, private pre: number, work: number, private guard?: DeviceGuard,
+              private onPressure?: () => Promise<void>) {
     this.total = total || 1;
     this.work = Math.max(work, 1e-9);
   }
@@ -569,6 +694,7 @@ export class Progress {
       if (v.action === 'ok') return;
       if (v.action === 'pause') { this.ctx.pauseSelf(v.message ?? 'Pausado para proteger el teléfono.'); return; }
       this.ctx.update({ message: v.message ?? 'Esperando a que el teléfono se recupere…', force: true });
+      if (v.code === 'low_memory') await this.onPressure?.();
       const t0 = performance.now();
       await sleepUnless(v.waitMs ?? 15_000, this.ctx.signal);
       this.idle += (performance.now() - t0) / 1000; // la espera no cuenta para el ritmo del ETA

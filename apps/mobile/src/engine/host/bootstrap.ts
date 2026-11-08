@@ -8,6 +8,7 @@
  */
 import { Capacitor } from '@capacitor/core';
 import { regionFits, type Settings } from '@starblitz/shared';
+import { createCaches } from '../pipeline/cache';
 import { LocalEngine } from '../api/localEngine';
 import { BrowserImageCodec } from '../importers/codec';
 import { openPdf } from '../importers/pdf';
@@ -107,6 +108,8 @@ export async function createDeviceEngine(opts: DeviceEngineOptions = {}): Promis
     storage, device, vision, visionModels, library, runtime, codec: new BrowserImageCodec(), pdf: openPdf, thumbs: browserThumbs, guard,
     // El original solo se borra si la traducción cabe en su globo (mismo cálculo que el editor y la exportación).
     fits: (region, page) => regionFits(region, page),
+    // Reutiliza lecturas OCR y traducciones idénticas (reanudar, reprocesar, repetir un capítulo) sin repetir el trabajo costoso.
+    caches: createCaches(storage),
   });
   const listener = engine.listen((e) => wake.onEvent(e));
 
