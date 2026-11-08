@@ -32,6 +32,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: '22', cache: npm }
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with: { packages: 'platform-tools' }
       - name: Plataforma y herramientas de compilación de Android
         run: sdkmanager --install "platforms;android-35" "build-tools;34.0.0" "build-tools;35.0.0" "platform-tools" > /dev/null
       - name: OCR PP-OCR (PyPI + SHA-256) e integridad de las bibliotecas de llama.cpp arm64
@@ -66,8 +67,8 @@ jobs:
       - name: Resumen
         if: always()
         run: |
-          [ -f informe-apk/apk-verificacion.md ] && cat informe-apk/apk-verificacion.md >> "$GITHUB_STEP_SUMMARY"
-          [ -f salida/STARBLITZ-android-arm64-CI.apk ] && sha256sum salida/STARBLITZ-android-arm64-CI.apk | tee salida/STARBLITZ-android-arm64-CI.apk.sha256
+          [ -f informe-apk/apk-verificacion.md ] && cat informe-apk/apk-verificacion.md >> "$GITHUB_STEP_SUMMARY" || true
+          [ -f salida/STARBLITZ-android-arm64-CI.apk ] && sha256sum salida/STARBLITZ-android-arm64-CI.apk | tee salida/STARBLITZ-android-arm64-CI.apk.sha256 || true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
