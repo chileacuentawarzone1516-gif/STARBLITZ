@@ -3,7 +3,7 @@
  * Un teléfono que se calienta reduce su velocidad por sí solo y una batería agotada pierde el trabajo en curso, así que
  * es mejor frenar a tiempo: esperar a que se enfríe, o pausar (el progreso queda guardado) y avisar con claridad.
  */
-import type { DeviceGuard, GuardVerdict } from '../pipeline/ports';
+import type { DeviceGuard, DeviceSample, GuardVerdict } from '../pipeline/ports';
 
 /** Estado que cambia mientras se trabaja (lo entrega el plugin nativo). */
 export interface DeviceStatus {
@@ -39,6 +39,14 @@ export class DeviceStatusGuard implements DeviceGuard {
     /** Se avisa cuando conviene soltar memoria (por ejemplo, descargar el modelo de lenguaje). */
     private onLowMemory?: () => void,
   ) {}
+
+  async sample(): Promise<DeviceSample | null> {
+    const s = await this.status().catch(() => null);
+    return s ? {
+      t: Math.round(Date.now() / 1000), battery_pct: s.battery_pct, charging: s.charging, battery_temp_c: s.battery_temp_c,
+      thermal: s.thermal, ram_free_mb: s.ram_free_mb, low_memory: s.low_memory,
+    } : null;
+  }
 
   async memory(): Promise<{ free_mb: number; low: boolean } | null> {
     const s = await this.status().catch(() => null);

@@ -73,8 +73,23 @@ export interface GuardVerdict {
 }
 
 /** Vigila la batería, la temperatura, la memoria y el espacio durante el procesamiento. */
+/** Foto del estado del dispositivo en un instante (batería, temperatura, memoria): solo para medir, no cambia el comportamiento. */
+export interface DeviceSample {
+  /** Segundos desde 1970. */
+  t: number;
+  battery_pct: number;
+  charging: boolean;
+  battery_temp_c: number;
+  /** PowerManager.THERMAL_STATUS_*: 0 normal … 6 apagado; -1 desconocido. */
+  thermal: number;
+  ram_free_mb: number;
+  low_memory: boolean;
+}
+
 export interface DeviceGuard {
   check(): Promise<GuardVerdict>;
+  /** Estado actual para los informes de rendimiento; `null` si el dispositivo no lo informa. */
+  sample?(): Promise<DeviceSample | null>;
   /** Memoria libre ahora (MB) y si el sistema avisa de que falta; `null` si no se conoce. */
   memory?(): Promise<{ free_mb: number; low: boolean } | null>;
 }

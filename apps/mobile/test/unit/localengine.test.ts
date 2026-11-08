@@ -411,6 +411,31 @@ describe('motor local del teléfono', () => {
     await expect(c.engine.dismissQueue('q_inexistente')).rejects.toMatchObject({ status: 404 });
   });
 
+  it('informe de rendimiento: sale del motor con lo medido en la última tarea y sin tokens ni claves', async () => {
+    const r = await rig();
+    const pid = await seeded(r);
+    await r.engine.updateSettings({ llm: { hf_token: 'hf_SECRETO_123', api_key: 'sk-SECRETO-456' } });
+    const before = await r.engine.report(pid);
+    expect(before.summary).toBeNull();                         // sin tarea terminada, no se inventa nada
+    expect(before.last_job).toBeNull();
+
+    expect((await wait(r.engine, (await r.engine.process(pid)).id)).status).toBe('done');
+    await queueSettled(r.engine, (q) => q[0]?.state === 'done');
+    const rep = await r.engine.report(pid);
+    expect(rep.schema).toBe('starblitz-report/1');
+    expect(rep.project).toMatchObject({ id: pid, pages: 4 });
+    expect(rep.summary).toMatchObject({ pages_measured: 4, ocr_calls: 4, ocr_cache_hits: 0 });
+    expect(rep.summary!.llm_calls).toBeGreaterThan(0);
+    expect(rep.run).toMatchObject({ status: 'done', counts: { total: 4, done: 4 } });
+    expect(rep.queue).toHaveLength(1);
+    expect(rep.device.caps.ram_gb).toBe(8);
+    const json = JSON.stringify(rep);
+    expect(json).not.toContain('SECRETO');
+    expect(json).not.toMatch(/hf_token|api_key/);
+    expect(JSON.parse(json).last_job.timings.pages).toHaveLength(4);
+    await expect(r.engine.report('p_inexistente')).rejects.toBeTruthy();
+  });
+
   it('una página dañada no detiene la obra y se puede reintentar sola', async () => {
     const r = await rig({ book: { ...BOOK, p2: { texts: ['x'], fail: true } } });
     const pid = await seeded(r);

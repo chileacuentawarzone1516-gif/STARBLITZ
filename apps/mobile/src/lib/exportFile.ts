@@ -53,6 +53,19 @@ export async function saveExports(files: ExportFile[], opts: { share: boolean })
   return out;
 }
 
+/** Nombre de archivo seguro para el informe de un proyecto. */
+export function reportFileName(projectName: string, when = new Date()): string {
+  const slug = projectName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'proyecto';
+  const stamp = when.toISOString().replace(/[:T]/g, '-').slice(0, 16);
+  return `starblitz-informe-${slug}-${stamp}.json`;
+}
+
+/** Guarda el informe de rendimiento (JSON) en Descargas/STARBLITZ y ofrece compartirlo. */
+export async function saveReport(projectName: string, report: unknown): Promise<SavedExport[]> {
+  const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+  return saveExports([{ name: reportFileName(projectName), blob }], { share: true });
+}
+
 /** Libera lo que quedó en la carpeta de exportaciones temporales. */
 export async function clearExportCache(): Promise<void> {
   if (isAndroidApp()) await nativePlugin().fsRemove({ path: 'exports' }).catch(() => undefined);

@@ -20,7 +20,7 @@ import type { ProjectStore } from '../store/projects';
 import { ContextualTranslator, isRefusal, mergeMemory } from '../translate/contextual';
 import { createClient, type ClientConfig, type LLMClient } from '../translate/llm';
 import type { LlmRuntime } from '../translate/runtime';
-import type { DeviceGuard, DeviceProvider, ModelLibrary, VisionPort } from './ports';
+import type { DeviceGuard, DeviceProvider, DeviceSample, ModelLibrary, VisionPort } from './ports';
 import { analysisKey, type CachedAnalysis, type PipelineCaches } from './cache';
 import { planConcurrency, type ConcurrencyPlan, type ConcurrencyPolicy } from './governor';
 import { RunState, STAGE_WEIGHT } from './runstate';
@@ -66,11 +66,15 @@ export interface PageTiming {
   ocr_cached: boolean;
   /** Llamadas reales al modelo de esta página y respuestas servidas desde la caché. */
   llm_calls: number; tr_cache_hits: number;
+  /** Estado del dispositivo al terminar la página (batería, temperatura, memoria libre); `null` si no se informa. */
+  device?: DeviceSample | null;
 }
 /** Medidas del capítulo completo (todas en segundos salvo que se indique). */
 export interface ChapterStats {
   total_s: number; model_load_s: number; queue_wait_s: number;
   llm_calls: number; translate_cache_hits: number; ocr_cache_hits: number; ocr_cache_misses: number;
+  /** Veces que se ejecutó de verdad el OCR/detector (con o sin caché activa). */
+  ocr_calls: number;
   /** Páginas cuyo análisis se solapó con la traducción de la anterior. */
   overlapped_pages: number;
   /** Veces que se soltaron los modelos opcionales por poca memoria. */
@@ -79,14 +83,17 @@ export interface ChapterStats {
   min_free_mb: number | null;
   /** Última decisión del gobernador de concurrencia. */
   plan: string;
+  /** Estado del dispositivo al empezar y al terminar la tarea. */
+  device_start: DeviceSample | null;
+  device_end: DeviceSample | null;
 }
 export interface TimingSummary { analyze_s: number; translate_s: number; clean_s: number; pages: PageTiming[]; chapter: ChapterStats }
 
 /** Acumula el tiempo de cada etapa por página durante una ejecución. */
 export class RunTiming {
   readonly chapter: ChapterStats = {
-    total_s: 0, model_load_s: 0, queue_wait_s: 0, llm_calls: 0, translate_cache_hits: 0, ocr_cache_hits: 0, ocr_cache_misses: 0,
-    overlapped_pages: 0, trims: 0, min_free_mb: null, plan: '',
+    total_s: 0, model_load_s: 0, queue_wait_s: 0, llm_calls: 0, translate_cache_hits: 0, ocr_cache_hits: 0, ocr_cache_misses: 0, ocr_calls: 0,
+    overlapped_pages: 0, trims: 0, min_free_mb: null, plan: '', device_start: null, device_end: null,
   };
   private pages = new Map<string, PageTiming>();
   private at(pid: string, index: number): PageTiming {
@@ -99,6 +106,8 @@ export class RunTiming {
     p[`${stage}_s` as 'analyze_s'] += ms / 1000;
     Object.assign(p, extra);
   }
+  /** Guarda cómo estaba el dispositivo al terminar una página. */
+  sample(pid: string, index: number, s: DeviceSample | null): void { this.at(pid, index).device = s; }
   summary(): TimingSummary {
     const r1 = (n: number) => Math.round(n * 10) / 10;
     const pages = [...this.pages.values()].sort((a, b) => a.page - b.page).map((p) => ({ ...p, analyze_s: r1(p.analyze_s), translate_s: r1(p.translate_s), clean_s: r1(p.clean_s) }));
@@ -210,6 +219,11 @@ export class Processor {
     return plan;
   }
 
+  /** Foto del estado del dispositivo para el informe (nunca falla: sin dato, `null`). */
+  private async sampleDevice(): Promise<DeviceSample | null> {
+    try { return (await this.d.guard?.sample?.()) ?? null; } catch { return null; }
+  }
+
   /** Poca memoria: la visión suelta los modelos grandes opcionales (se recargan solos si hacen falta). */
   private async trim(): Promise<void> {
     if (!this.d.vision.trim) return;
@@ -241,6 +255,7 @@ export class Processor {
     this.timing.chapter.queue_wait_s = Math.max(0, Date.now() / 1000 - ctx.job.created);
     this.useOcrCache = !force && !!this.d.caches;
     this.runVision = null;
+    this.timing.chapter.device_start = await this.sampleDevice();
     const started = performance.now();
     let translator: ContextualTranslator | null = null;
     try {
@@ -321,6 +336,7 @@ export class Processor {
           }
           if (need.includes('clean')) stats.preserved += await this.stepClean(ctx, progress, run, projectId, pid, label);
           run.setPage(pid, 'done');
+          this.timing.sample(pid, idx, await this.sampleDevice());
           pages.delete(pid); // la página terminada no se vuelve a necesitar en memoria
           progress.pageFinished(pid, need);
         } catch (e) {
@@ -336,6 +352,7 @@ export class Processor {
 
       stats.seconds = Math.round((performance.now() - started) / 100) / 10;
       this.timing.chapter.total_s = (performance.now() - started) / 1000;
+      this.timing.chapter.device_end = await this.sampleDevice();
       if (translator) {
         this.timing.chapter.llm_calls = translator.stats.llm_calls;
         this.timing.chapter.translate_cache_hits = translator.stats.cache_hits;
@@ -508,6 +525,7 @@ export class Processor {
     }
     if (!res) {
       const original = await mustImage(store, project.id, page.id, 'original');
+      this.timing.chapter.ocr_calls += 1;
       res = await this.d.vision.analyze({
         original, lang, direction: project.reading_direction, sfx: project.sfx, pageHeight: page.height,
       }, signal);

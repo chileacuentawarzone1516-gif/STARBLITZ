@@ -69,3 +69,5 @@ GitHub Actions (`build.yml`, manual o desde `release.yml`) o Android Studio.
 
 La lista A1–A… de [PRUEBAS-HARDWARE](PRUEBAS-HARDWARE.md) (instalación, arranque de `llama-server`, modo avión, capítulo
 completo, batería y temperatura) está **pendiente en teléfonos reales**.
+
+Para medir el rendimiento del motor (Fase 4) en un teléfono real, sigue [VALIDACION-FASE4-ANDROID](VALIDACION-FASE4-ANDROID.md).

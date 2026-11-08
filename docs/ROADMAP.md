@@ -33,7 +33,7 @@ Detalle y estado por etapa en [MOTOR-AUDITORIA](MOTOR-AUDITORIA.md), [MODELOS-IN
 | Etapa | Estado |
 |---|---|
 | Protección de diálogos (no borrar sin traducción válida; OCR vacío visible) | 🧪 implementada y probada con piezas simuladas; ⏳ falta en el teléfono |
-| Medición por etapa y por página | 🧪 implementada; ⏳ falta medir en el Redmi Note 8 Pro |
+| Medición por etapa y por página + informe JSON exportable | 🧪 implementada; ⏳ falta medir en el Redmi Note 8 Pro ([protocolo](VALIDACION-FASE4-ANDROID.md)) |
 | Cola persistente, caché de OCR y de traducciones, concurrencia por RAM, liberación de memoria (móvil) | 🧪 implementada y probada con piezas simuladas; ⏳ sin medir en el teléfono; ⏳ aviso de la cola en la interfaz |
 | Segundo plano en Android (servicio en primer plano) | ⏳ diseño |
 | Estilo visual del texto | ⏳ diseño |

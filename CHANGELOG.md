@@ -13,6 +13,12 @@ las pruebas de [docs/PRUEBAS-HARDWARE.md](docs/PRUEBAS-HARDWARE.md).
 
 ### Añadido
 
+- **Informe de rendimiento exportable (móvil):** menú del proyecto → «Exportar informe de rendimiento (JSON)». Reúne
+  `project.last_job.timings`, un resumen calculado (tiempos, tokens/s, llamadas y aciertos de caché, batería, temperatura y
+  memoria libre del sistema) y el estado del dispositivo; sin tokens, imágenes ni textos. Las muestras del dispositivo se toman
+  al empezar, tras cada página y al terminar (solo lectura). Protocolo en
+  [docs/VALIDACION-FASE4-ANDROID.md](docs/VALIDACION-FASE4-ANDROID.md).
+
 - **Rendimiento y lotes (móvil, Fase 4):** cola persistente de procesamiento con recuperación tras un cierre (`queue()`,
   `resumeQueue()`, `dismissQueue()`); caché de OCR y de traducciones con claves que incluyen todo el contexto (nunca se
   reutiliza un resultado vacío, rechazado o con otro contexto; «forzar» las salta); gobernador de concurrencia por RAM y memoria

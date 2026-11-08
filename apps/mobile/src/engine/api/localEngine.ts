@@ -29,6 +29,7 @@ import type { VisionModelManager } from '../models/vision';
 import type { PipelineCaches } from '../pipeline/cache';
 import { Processor, STAGES, type ProcessorDeps } from '../pipeline/processor';
 import { ProcessQueue } from '../pipeline/queue';
+import { buildReport, type PerformanceReport } from '../pipeline/report';
 import type { DeviceProvider, VisionPort } from '../pipeline/ports';
 import { describeRun, type RunData } from '../pipeline/runstate';
 import type { DocStorage } from '../store/docs';
@@ -557,6 +558,39 @@ export class LocalEngine {
 
   async run(pid: string): Promise<RunInfo | null> {
     return describeRun(this.store, pid, !!this.jobs.activeFor(pid));
+  }
+
+  /**
+   * Informe de rendimiento del proyecto (para exportar como JSON): lo que midió la última tarea terminada
+   * (`project.last_job.timings`), el estado del proyecto y del dispositivo y un resumen calculado. Solo LEE: no cambia nada.
+   * Nunca incluye tokens, claves, imágenes ni textos del manga.
+   */
+  async report(pid: string): Promise<PerformanceReport> {
+    const project = await this.store.get(pid);
+    const s = this.settings;
+    const [info, caps, now, llm, run] = await Promise.all([
+      this.d.device.info().catch(() => null), this.d.device.caps(), this.d.guard?.sample?.().catch(() => null) ?? null, this.llmSummary().catch(() => null), this.run(pid),
+    ]);
+    const g = globalThis as { crossOriginIsolated?: boolean; navigator?: { userAgent?: string } };
+    return buildReport({
+      generated: Date.now() / 1000,
+      appVersion: this.d.version ?? ENGINE_VERSION,
+      device: { info, caps, now },
+      runtime: { cross_origin_isolated: typeof g.crossOriginIsolated === 'boolean' ? g.crossOriginIsolated : null, user_agent: g.navigator?.userAgent ?? '' },
+      settings: {
+        processing: s.processing,
+        translation: { quality: s.translation.quality, profile: s.translation.profile, target_variant: s.translation.target_variant, sfx: s.translation.sfx },
+        llm: { provider: s.llm.provider, model: s.llm.model, temperature: s.llm.temperature, context_window: s.llm.context_window, use_vision: s.llm.use_vision },
+      },
+      llm: llm ? { active: llm.active, ready: llm.ready, running: llm.running, running_model: llm.running_model } : {},
+      project: {
+        id: project.id, name: project.name, pages: project.page_ids.length, source_lang: project.source_lang, detected_lang: project.detected_lang,
+        translation_profile: project.translation_profile,
+      },
+      run,
+      lastJob: (project.last_job as Record<string, unknown> | null) ?? null,
+      queue: this.processQueue.list(),
+    });
   }
 
   async dispose(): Promise<void> {

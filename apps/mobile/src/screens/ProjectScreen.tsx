@@ -1,13 +1,14 @@
-import { AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, BookMarked, BookOpen, Check, Cpu, Download, FilePlus2, MoreVertical, PenLine, RefreshCw, Trash2 } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, BookMarked, BookOpen, Check, Cpu, Download, FilePlus2, MoreVertical, PenLine, RefreshCw, Trash2 } from 'lucide-react';
 import { LANGUAGES, PAGE_STATE_LABELS, VARIANTS, type Page, type PageState } from '@starblitz/shared';
 import { useState } from 'react';
 import { TranslatedThumb, useImageUrl } from '../components/images';
 import { Segmented, Sheet, TopBar } from '../components/ui';
 import { useBundle } from '../hooks';
 import { startProcess } from '../lib/actions';
+import { saveReport } from '../lib/exportFile';
 import { tap } from '../lib/platform';
 import { navigate } from '../router';
-import { confirmAction, engine, reportError, useActiveJob, useApp } from '../state/app';
+import { confirmAction, engine, reportError, toast, useActiveJob, useApp } from '../state/app';
 import { ExportSheet } from './ExportSheet';
 import { ImportSheet } from './ImportSheet';
 import { RunPanel } from './RunPanel';
@@ -53,6 +54,13 @@ export function ProjectScreen({ id }: { id: string }) {
     const [moved] = ids.splice(from, 1);
     ids.splice(to, 0, moved);
     try { await engine().reorderPages(id, ids); await reload(); } catch (e) { reportError(e); }
+  };
+  const exportReport = async () => {
+    try {
+      const saved = await saveReport(project.name, await engine().report(id));
+      openSheet(null);
+      toast('ok', saved[0]?.location ? `Informe guardado en ${saved[0].location}` : 'Informe listo');
+    } catch (e) { reportError(e, 'No se pudo exportar el informe'); }
   };
   const removePage = async (p: Page) => {
     if (!(await confirmAction({ title: `¿Eliminar la página ${p.index + 1}?`, message: 'Se borra del proyecto en este teléfono.', confirm: 'Eliminar', danger: true }))) return;
@@ -135,6 +143,7 @@ export function ProjectScreen({ id }: { id: string }) {
           <button onClick={() => openSheet('import-add')} disabled={working}><FilePlus2 />Añadir páginas</button>
           <button onClick={() => { openSheet(null); navigate(`/p/${id}/context`); }}><BookMarked />Contexto, glosario y estilo</button>
           <button onClick={reprocess} disabled={working || !pages.length}><RefreshCw />Reprocesar todo</button>
+          <button onClick={exportReport}><Activity />Exportar informe de rendimiento (JSON)</button>
           <button className="danger" onClick={removeProject} disabled={working}><Trash2 />Eliminar proyecto</button>
         </div>
       </Sheet>
