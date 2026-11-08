@@ -11,7 +11,7 @@ Estados al anotar: **CONFIRMADO · PENDIENTE · NO VERIFICADO · ERROR**.
 | Etiqueta | APK | Qué tiene |
 |---|---|---|
 | **A (línea base)** | `android.yml` #6, commit `0d25cdb` (SHA-256 `3fec59ce…fbe43`) | Fases 3–4 y traductor de texto plano, **sin** control térmico ni desglose de visión |
-| **B (nuevo)** | el que genere `android.yml` para el commit de esta fase (ver informe) | A + **control térmico** + **desglose de tiempos de visión** + margen térmico en el plugin |
+| **B (nuevo)** | `android.yml` #7, commit `a188a80` ([run 42518760487](https://github.com/chileacuentawarzone1516-gif/STARBLITZ/actions/runs/42518760487)), SHA-256 `9f48ff0a66bf637fa2fa125cb2ae0a0048bd00321d3618d9e63813fa8627d00e` | A + **control térmico** + **desglose de tiempos de visión** + margen térmico en el plugin |
 
 Instala uno cada vez (`adb uninstall app.starblitz.mobile` entre ellos: la firma es desechable y cada ejecución usa otra).
 
