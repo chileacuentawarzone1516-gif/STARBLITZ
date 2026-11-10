@@ -25,9 +25,15 @@ export class UrlVisionAssets implements VisionAssets {
   private model(id: string, rel: string) { return `${this.config.modelsBase}/${id}/${rel}`; }
 
   async detector(): Promise<Uint8Array> {
+    if (this.flags().detectorKind === 'manga-det') {
+      if (!this.flags().detector) throw new ModelMissingError('text-detector-manga', 'Detector ligero PP-OCRv6 Manga (experimental)');
+      return this.bytes(this.model('text-detector-manga', 'manga_det.onnx'));
+    }
     if (!this.flags().detector) throw new ModelMissingError('text-detector', 'Detector de texto');
     return this.bytes(this.model('text-detector', 'comictextdetector.onnx'));
   }
+
+  async detectorKind(): Promise<'default' | 'manga-det'> { return this.flags().detectorKind ?? 'default'; }
 
   ppocr(): Promise<Uint8Array> {
     this.ppocrBytes ??= this.bytes(this.config.ppocrUrl).catch((e) => { this.ppocrBytes = null; throw e; });

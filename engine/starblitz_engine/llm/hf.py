@@ -28,15 +28,29 @@ def endpoint() -> str:
     return os.environ.get("HF_ENDPOINT", DEFAULT_ENDPOINT).rstrip("/")
 
 
+# Modelos que STARBLITZ no admite aunque se busquen a mano (decisión del titular, D3: su licencia no es compatible con la
+# distribución del proyecto). No se listan, no se describen, no se instalan y, si ya estuvieran instalados, no se usan.
+_BLOCKED_MODEL_RE = re.compile(r"plamo", re.I)
+BLOCKED_MODEL_MESSAGE = "Este modelo no está autorizado en STARBLITZ: su licencia no es compatible con la distribución del proyecto."
+
+
+def is_blocked_model(text: str) -> bool:
+    return bool(_BLOCKED_MODEL_RE.search(text or ""))
+
+
 def validate_repo(repo: str) -> str:
     if not _REPO_RE.match(repo or ""):
         raise AppError("invalid_repo", "Identificador de repositorio no válido (formato esperado: autor/nombre).", 422)
+    if is_blocked_model(repo):
+        raise AppError("model_not_allowed", BLOCKED_MODEL_MESSAGE, 403)
     return repo
 
 
 def validate_path(path: str) -> str:
     if not path or ".." in path.split("/") or not _PATH_RE.match(path):
         raise AppError("invalid_file", "Nombre de archivo no válido.", 422)
+    if is_blocked_model(path):
+        raise AppError("model_not_allowed", BLOCKED_MODEL_MESSAGE, 403)
     return path
 
 
@@ -143,7 +157,7 @@ def search(query: str, token: str = "", limit: int = 20, timeout: float = 20.0) 
                     "likes": int(item.get("likes") or 0), "license": lic or "desconocida", "gated": bool(item.get("gated")),
                     "updated": item.get("lastModified") or item.get("createdAt") or "", "languages": langs[:8],
                     "task": item.get("pipeline_tag") or ""})
-    return [m for m in out if _REPO_RE.match(m["repo"])]
+    return [m for m in out if _REPO_RE.match(m["repo"]) and not is_blocked_model(m["repo"])]
 
 
 def _check(resp: httpx.Response, repo: str) -> None:

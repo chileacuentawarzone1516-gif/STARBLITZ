@@ -150,8 +150,13 @@ describe('modelos de visión', () => {
   afterEach(async () => { files.dispose(); await http.close(); });
 
   it('el registro de Android es el mismo que el de Python (JSON exportado)', () => {
-    expect(VISION_REGISTRY.map((s) => s.id)).toEqual(['text-detector', 'manga-ocr', 'lama']);
+    expect(VISION_REGISTRY.map((s) => s.id)).toEqual(['text-detector', 'text-detector-manga', 'manga-ocr', 'lama']);
     expect(VISION_REGISTRY.find((s) => s.id === 'text-detector')!.files[0].sha256).toBe('1a86ace74961413cbd650002e7bb4dcec4980ffa21b2f19b86933372071d718f');
+    // Detector EXPERIMENTAL: opcional, revisión fijada y huella del archivo real (no es el predeterminado).
+    const light = VISION_REGISTRY.find((s) => s.id === 'text-detector-manga')!;
+    expect(light.required).toBe(false);
+    expect(light.files[0].url).toContain('/resolve/v0.3/');
+    expect(light.files[0].sha256).toBe('97c434ae8deaad83513fb132b605d5085a3af8ffac2cb15e2aa096815c206172');
     expect(pinned).toEqual(VISION_REGISTRY);
   });
 

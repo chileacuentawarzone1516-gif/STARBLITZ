@@ -16,12 +16,22 @@ export class HFError extends Error {
   constructor(public code: string, message: string) { super(message); }
 }
 
+/**
+ * Modelos que STARBLITZ no admite aunque el usuario los busque a mano (decisión del titular, D3: su licencia no es compatible con
+ * la distribución del proyecto). No se listan, no se describen, no se instalan y, si ya estuvieran en el dispositivo, no se usan.
+ */
+const BLOCKED_MODEL_RE = /plamo/i;
+export const BLOCKED_MODEL_MESSAGE = 'Este modelo no está autorizado en STARBLITZ: su licencia no es compatible con la distribución del proyecto.';
+export const isBlockedModel = (text: string): boolean => BLOCKED_MODEL_RE.test(text || '');
+
 export const validateRepo = (repo: string) => {
   if (!REPO_RE.test(repo || '')) throw new HFError('invalid_repo', 'Identificador de repositorio no válido (formato esperado: autor/nombre).');
+  if (isBlockedModel(repo)) throw new HFError('model_not_allowed', BLOCKED_MODEL_MESSAGE);
   return repo;
 };
 export const validatePath = (path: string) => {
   if (!path || path.split('/').includes('..') || !PATH_RE.test(path)) throw new HFError('invalid_file', 'Nombre de archivo no válido.');
+  if (isBlockedModel(path)) throw new HFError('model_not_allowed', BLOCKED_MODEL_MESSAGE);
   return path;
 };
 
@@ -92,7 +102,7 @@ export class HuggingFace {
       return { repo: item.id || item.modelId || '', downloads: Number(item.downloads || 0), likes: Number(item.likes || 0), license,
         license_info: licenseInfo(license), gated: !!item.gated, updated: item.lastModified || item.createdAt || '',
         languages: langs.slice(0, 8), task: item.pipeline_tag || '', installed: false };
-    }).filter((m) => REPO_RE.test(m.repo));
+    }).filter((m) => REPO_RE.test(m.repo) && !isBlockedModel(m.repo));
   }
 }
 

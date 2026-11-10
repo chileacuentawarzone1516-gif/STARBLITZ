@@ -13,6 +13,7 @@ import { configureOrt, createSession, releaseSession, type OrtOptions, type OrtS
 import { decodeToBgr, decodeToGray, encodeMat, loadCv, median, type Cv, type Mat } from '../runtime/cv';
 import { annotateForLlm } from './annotate';
 import { TextDetector } from './detector';
+import { MangaLineDetector } from './mangaDet';
 import { guessFromBlocks, guessFromText } from './langid';
 import { detectPanels, readingOrder } from './layout';
 import { type MangaOcrFiles, MangaOcrEngine } from './ocr/mangaOcr';
@@ -23,8 +24,10 @@ import { blockArea, type Box, type DetectedBlock } from './types';
 
 /** De dónde salen los modelos de visión. */
 export interface VisionAssets {
-  /** Detector de texto (obligatorio). Lanza `ModelMissingError` si no está instalado. */
+  /** Detector de texto elegido (obligatorio). Lanza `ModelMissingError` si no está instalado. */
   detector(): Promise<Uint8Array>;
+  /** Qué detector entrega `detector()`; sin implementar = el de siempre. EXPERIMENTAL: «manga-det». */
+  detectorKind?(): Promise<'default' | 'manga-det'>;
   /** Reconocedor PP-OCR del idioma (viene con la app). */
   ppocr(lang: string): Promise<Uint8Array>;
   /** ¿Se debe usar Manga OCR para el japonés? (instalado y permitido por el perfil del dispositivo). Es barato: no lee el modelo. */
@@ -45,7 +48,8 @@ const VERTICAL_LANGS = ['ja', 'zh', 'zh-hant'];
 
 export class VisionService implements VisionPort {
   private cv: Cv | null = null;
-  private detector: TextDetector | null = null;
+  private detector: TextDetector | MangaLineDetector | null = null;
+  private detectorKindLoaded: 'default' | 'manga-det' | null = null;
   private detectorSession: OrtSession | null = null;
   private ocr = new Map<string, OcrEngine>();
   private lama: LamaInpainter | null | undefined;
@@ -63,12 +67,24 @@ export class VisionService implements VisionPort {
     return this.cv;
   }
 
-  private async detectorEngine(): Promise<TextDetector> {
+  private async detectorKind(): Promise<'default' | 'manga-det'> {
+    return (await this.assets.detectorKind?.()) ?? 'default';
+  }
+
+  private async detectorEngine(): Promise<TextDetector | MangaLineDetector> {
     await this.runtime();
+    const kind = await this.detectorKind();
+    if (this.detector && this.detectorKindLoaded !== kind) {
+      // Cambió el ajuste: se suelta el detector anterior y se carga el elegido.
+      await releaseSession(this.detectorSession);
+      this.detector = null;
+      this.detectorSession = null;
+    }
     if (!this.detector) {
       const bytes = await this.assets.detector(); // ModelMissingError si falta
       this.detectorSession = await createSession(bytes);
-      this.detector = await TextDetector.create(this.detectorSession);
+      this.detector = kind === 'manga-det' ? await MangaLineDetector.create(this.detectorSession) : await TextDetector.create(this.detectorSession);
+      this.detectorKindLoaded = kind;
     }
     return this.detector;
   }
@@ -104,7 +120,9 @@ export class VisionService implements VisionPort {
 
   /** Motor de lectura que se usaría para este idioma: forma parte de la clave de la caché de OCR. */
   async fingerprint(lang: string): Promise<string> {
-    return lang === 'ja' && (await this.assets.hasMangaOcr()) ? 'manga-ocr' : `ppocr-${lang}`;
+    const ocr = lang === 'ja' && (await this.assets.hasMangaOcr()) ? 'manga-ocr' : `ppocr-${lang}`;
+    // El detector experimental da otro análisis: entra en la clave para no reutilizar el del detector por defecto (y viceversa).
+    return (await this.detectorKind()) === 'manga-det' ? `${ocr}+manga-det` : ocr;
   }
 
   /** Poca memoria: se sueltan los modelos grandes opcionales (Manga OCR y LaMa); se recargan solos si hacen falta. */

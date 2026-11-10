@@ -1,5 +1,9 @@
 # Benchmark de traducción (PC, CPU) — 2026-11-08
 
+> **PLaMo retirado del código (2026-11-09, D3 no autorizado).** STARBLITZ ya no reconoce, busca, describe, instala ni usa
+> PLaMo 3 Translate (bloqueo en `apps/shared/src/llm/hf.ts` y `engine/starblitz_engine/llm/hf.py`; el procesador rechaza un PLaMo ya
+> instalado). Las medidas de PLaMo que aparecen abajo son un **registro histórico** del benchmark del 2026-11-08, no una opción.
+
 **Qué es y qué NO es.** Mediciones **reales y reproducibles** hechas en un PC (Intel i7-13620H, 32 GB, **solo CPU**, 6 hilos, `llama-server`
 b12017 = la misma versión que se empaqueta en Android), con el corpus propio de [`tools/bench`](../tools/bench/README.md). **No hay ninguna
 medición del Redmi Note 8 Pro ni de ningún teléfono**: los **tiempos y la RAM** de abajo son de este PC; los **recuentos de tokens y de

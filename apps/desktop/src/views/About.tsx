@@ -2,6 +2,7 @@ import { useApp } from '../store';
 
 const CREDITS = [
   ['comic-text-detector', 'Detección de texto y globos', 'GPL-3.0'],
+  ['PP-OCRv6 Manga (experimental, opcional)', 'Detección de líneas de texto', 'Apache-2.0'],
   ['Manga OCR (kha-white)', 'OCR japonés especializado', 'Apache-2.0'],
   ['PaddleOCR PP-OCR vía RapidOCR', 'OCR multilingüe', 'Apache-2.0'],
   ['LaMa (Samsung AI)', 'Reconstrucción de fondos', 'Apache-2.0'],

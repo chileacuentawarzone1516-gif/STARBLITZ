@@ -163,7 +163,6 @@ export class FakeLlm extends LLMClient {
     const user = messages[messages.length - 1].content;
     const numberedLines = user.split('\n').map((l) => /^\[(\d+)\] (.*)$/.exec(l)).filter((m): m is RegExpExecArray => !!m);
     if (numberedLines.length) return numberedLines.map((m) => `[${m[1]}] ${tr(m[2])}`).join('\n');
-    if ('chat_template_kwargs' in extra && (extra.chat_template_kwargs as { target_lang?: string }).target_lang) return user.split('\n').map(tr).join('\n');
     return tr(user.split('\n\n').pop() ?? user);
   }
 

@@ -24,12 +24,6 @@ MATRIX = [
     ('Hy-MT2-1.8B-Q4_K_M.gguf', 'hymt2', 'per', True),
     ('Hy-MT2-1.8B-Q4_K_M.gguf', 'hymt2', 'batch', False),
     ('Hy-MT2-1.8B-Q4_K_M.gguf', 'hymt2', 'batch', True),
-    ('plamo-3-translate-0.8b-Q4_K_M.gguf', 'plamo', 'per', False),
-    ('plamo-3-translate-0.8b-Q4_K_M.gguf', 'plamo', 'per', True),
-    ('plamo-3-translate-0.8b-Q4_K_M.gguf', 'plamo', 'batch', False),
-    ('plamo-3-translate-2b-Q4_K_M.gguf', 'plamo', 'per', False),
-    ('plamo-3-translate-2b-Q4_K_M.gguf', 'plamo', 'per', True),
-    ('plamo-3-translate-2b-Q4_K_M.gguf', 'plamo', 'batch', False),
 ]
 
 

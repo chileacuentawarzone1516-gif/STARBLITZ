@@ -6,6 +6,11 @@ simulada funcione: la columna «Simulado» lo dice. Lo que no se pudo probar est
 Entorno: contenedor Linux x64 de 2 vCPU y 8 GB, sin GPU, Python 3.13, Node 22, Chromium (Playwright 1.63), JDK 21. Sin
 acceso a Hugging Face, Google Maven ni Gradle.
 
+> **Actualización 2026-11-09 (Windows 11, PC del titular):** shared 30/30 · mobile 238/238 · `tsc` sin errores · pytest 95 OK + 2 fallos
+> esperados (limitaciones del detector experimental) + 7 fallos conocidos solo de Windows · paridad del detector experimental Python ↔
+> TypeScript sobre 46 páginas reales · **primer capítulo real procesado de principio a fin** con modelos reales (ver
+> [EVALUACION-CORPUS-USM](EVALUACION-CORPUS-USM.md)). Las tablas de abajo describen la entrega anterior (contenedor Linux).
+
 ## Resumen por categoría
 
 | Categoría | Qué es | Resultado |

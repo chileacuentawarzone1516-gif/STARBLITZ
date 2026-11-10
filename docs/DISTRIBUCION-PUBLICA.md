@@ -1,16 +1,22 @@
 # Distribución pública, firma y actualización
 
-Estado: **diseño** (nada de lo que sigue está publicado ni activado). El código fuente permanece en este repositorio, **privado
-para siempre**; lo público es un repositorio aparte, `STARBLITZ-RELEASES`, que contiene **solo** lo necesario para presentar y
-distribuir la app. Leyenda: ✅ implementado y probado · 🧪 solo en pruebas automáticas · 📐 diseñado · ⛔ bloqueado por una decisión
-o un dato que debe aportar el titular.
+Estado: **diseño** (nada de lo que sigue está publicado ni activado). Leyenda: ✅ implementado y probado · 🧪 solo en pruebas
+automáticas · 📐 diseñado · ⛔ bloqueado por una decisión o un dato que debe aportar el titular.
+
+> **Cambio de premisa (comprobado el 2026-11-09 con la API de GitHub):** el repositorio de código `STARBLITZ` es **público** (no
+> privado, como suponía la primera versión de este diseño, del 2026-11-08). Consecuencias, **sin decidir nada por el titular**:
+> (1) el actualizador podría leer las Releases de este mismo repositorio sin credenciales, así que el repositorio aparte
+> `STARBLITZ-RELEASES` deja de ser imprescindible (sigue siendo una opción si se quiere separar presentación y código) — ⛔ decisión
+> del titular; (2) todo lo que se suba aquí es visible: las reglas de «nunca se publica» de abajo se aplican **a cada push**, no solo
+> a las Releases (la lista blanca de `.gitignore` y `scripts/ci/verificar-repo.sh` ya lo hacen); (3) la licencia (D2) y el logo (D1)
+> pasan a ser visibles para cualquiera mientras siguen pendientes.
 
 ## 1. Qué es público y qué no
 
 | Repositorio | Visibilidad | Contenido |
 |---|---|---|
-| `STARBLITZ` (código) | **Privado, permanente** | Todo el código, el CI, los documentos de trabajo |
-| `STARBLITZ-RELEASES` | **Público** | `README.md` de presentación, capturas **reales**, documentación de instalación, `CHANGELOG`, `latest.json` (+ firma), y en *Releases*: APK, instalador EXE, ZIP portable y `SHA256SUMS.txt` |
+| `STARBLITZ` (código) | **Público** (comprobado 2026-11-09) | Todo el código, el CI, los documentos de trabajo (sin Vault, sin respaldos, sin modelos ni secretos) |
+| `STARBLITZ-RELEASES` (opcional, ⛔) | Público, si se crea | `README.md` de presentación, capturas **reales**, documentación de instalación, `CHANGELOG`, `latest.json` (+ firma), y en *Releases*: APK, instalador EXE, ZIP portable y `SHA256SUMS.txt` |
 
 **Nunca se publica** (comprobación automática obligatoria antes de cada publicación): código fuente, `.env`, `*.jks`, `*.keystore`,
 `*.pem`, `*.p12`, tokens o contraseñas, el Vault de Obsidian (`STARBLITZ OBISIDIAN/`), `_backup/`, modelos o binarios de terceros
@@ -28,20 +34,20 @@ alguno coincide con esos patrones o si encuentra cadenas con forma de credencial
 | `latest.json` + `latest.json.sig` | — | Manifiesto para el actualizador (ver §5) |
 
 Cada Release lleva su numeración SemVer (`vMAJOR.MINOR.PATCH`), notas de cambios y la **tabla de hashes** en el cuerpo. Las notas se
-extraen del `CHANGELOG` del repositorio privado (ya lo comprueba `release.yml`). El historial de versiones es el de las Releases del
+extraen del `CHANGELOG` del repositorio de código (ya lo comprueba `release.yml`). El historial de versiones es el de las Releases del
 repositorio público.
 
 ## 3. Flujo de publicación (propuesto, sobre `release.yml`)
 
-1. Etiqueta `v*` en el repositorio privado → `release.yml` (ya existente) ejecuta `ci.yml` y `build.yml` con **firma obligatoria**.
-2. Se crea el **borrador** en el repositorio privado (ya implementado: nada se publica solo).
+1. Etiqueta `v*` en el repositorio de código → `release.yml` (ya existente) ejecuta `ci.yml` y `build.yml` con **firma obligatoria**.
+2. Se crea el **borrador** en el repositorio de código (ya implementado: nada se publica solo).
 3. Un trabajo nuevo `publish-public` (📐), que **solo** se ejecuta tras aprobación manual (*environment* protegido):
    - descarga los artefactos firmados del borrador,
    - recalcula `SHA256SUMS.txt` y `latest.json`, **firma el manifiesto** (§5),
    - ejecuta la comprobación de «nada prohibido» (§1),
    - crea la Release en `STARBLITZ-RELEASES` con un **token de ámbito mínimo** (ver abajo).
 4. El token: *fine-grained personal access token* con **solo** `Contents: write` sobre `STARBLITZ-RELEASES`, guardado como secreto de
-   Actions del repositorio privado. **Nunca** va en la app, en el código ni en un archivo del repositorio. Caduca (≤ 1 año) y se rota.
+   Actions del repositorio de código. **Nunca** va en la app, en el código ni en un archivo del repositorio. Caduca (≤ 1 año) y se rota.
 
 ## 4. Firma
 

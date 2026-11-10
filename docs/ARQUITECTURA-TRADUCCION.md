@@ -1,5 +1,9 @@
 # Arquitectura de traducción: por qué era lenta y qué cambia
 
+> **PLaMo retirado del código (2026-11-09, D3 no autorizado).** STARBLITZ ya no reconoce, busca, describe, instala ni usa
+> PLaMo 3 Translate (bloqueo en `apps/shared/src/llm/hf.ts` y `engine/starblitz_engine/llm/hf.py`; el procesador rechaza un PLaMo ya
+> instalado). Las medidas de PLaMo que aparecen abajo son un **registro histórico** del benchmark del 2026-11-08, no una opción.
+
 Resume la causa de la lentitud, las opciones de arquitectura evaluadas y lo que está implementado. Datos y método:
 [BENCHMARK-TRADUCCION](BENCHMARK-TRADUCCION.md) (PC, CPU; **ninguna medida del teléfono**). Estados: **CONFIRMADO** (medido o comprobado en el código) ·
 **IMPLEMENTADO** (código + pruebas con modelo simulado) · **NO VERIFICADO** (sin medir en el Redmi) · **DISEÑO** (no implementado).
@@ -48,11 +52,11 @@ Resume la causa de la lentitud, las opciones de arquitectura evaluadas y lo que 
 
 ## 3. Qué está implementado
 
-- `PlainTranslator` (TypeScript y Python): una llamada por página con el formato nativo de la familia del modelo (**PLaMo 3 Translate** por plantilla `chat_template_kwargs`;
+- `PlainTranslator` (TypeScript y Python): una llamada por página con el formato nativo de la familia del modelo (
   **Hy-MT2/HY-MT** por instrucción + terminología; **genérico** por instrucción de fidelidad total), reintento individual de lo que falte o sea una negativa, marcado
   para revisión (nunca vacío ni aceptado) si sigue sin haber traducción, y aviso si la salida conserva caracteres del idioma original.
 - **Selección automática por familia de modelo**: los modelos dedicados usan texto plano; **Qwen/Gemma y el resto siguen con el traductor contextual** (comportamiento por defecto
-  **sin cambios**). Para servidores sin `chat_template_kwargs` (Ollama, LM Studio) las opciones de PLaMo van como mensaje de sistema `[plamo-translate]` (formato de su ficha).
+  **sin cambios**). El soporte de PLaMo (plantilla propia, mensaje `[plamo-translate]`, historial) se **retiró del código el 2026-11-09** (D3).
 - Catálogo curado: **Hy-MT2-1.8B** (Apache-2.0), seleccionable, **no recomendado por defecto**. PLaMo **no** se ofrece (decisión D3, §4).
 - Pruebas: 22 nuevas en móvil (TS; suite móvil 226/226) y 13 en el motor Python, con modelo simulado: verifican el protocolo (qué se pide, qué se reintenta, qué se conserva, qué se cachea), **no la
   calidad real**.
@@ -76,7 +80,7 @@ Resume la causa de la lentitud, las opciones de arquitectura evaluadas y lo que 
 
 ## 6. Procedimiento para decidir con datos reales (lo ejecuta el titular)
 
-1. Instalar el APK de pruebas y, en *Modelos*, instalar Hy-MT2-1.8B (y PLaMo-0.8B desde la búsqueda, si se acepta su licencia); usar **Comparar modelos** (existente) con Qwen-4B.
+1. Instalar el APK de pruebas y, en *Modelos*, instalar Hy-MT2-1.8B (PLaMo no: D3, bloqueado en la app); usar **Comparar modelos** (existente) con Qwen-4B.
 2. Procesar un capítulo de 27 páginas con cada uno y **exportar el informe de rendimiento** (menú del proyecto): tiempo por etapa y página, tokens/s, RAM libre, batería y temperatura
    ([VALIDACION-FASE4-ANDROID](VALIDACION-FASE4-ANDROID.md)).
 3. Revisar a mano globos y diálogos (¿suavizado?, ¿omisiones?, ¿coherencia entre globos?).

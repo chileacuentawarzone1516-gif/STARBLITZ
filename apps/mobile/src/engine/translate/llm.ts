@@ -124,6 +124,9 @@ export class OpenAICompatibleClient extends LLMClient {
     return {
       model: a.model, temperature: a.temperature, messages: messages.map((m) => ({ role: m.role, content: content(m) })),
       response_format: { type: 'json_schema', json_schema: { name: 'respuesta', schema, strict: true } },
+      // Igual que el motor integrado: sin tope ni «enable_thinking=false», Qwen3.5 en un servidor externo razona y puede generar
+      // miles de tokens por página (medido el 2026-11-09 en el PC: >8 500 tokens en una sola llamada).
+      max_tokens: 4096, chat_template_kwargs: { enable_thinking: false },
     };
   }
 
@@ -143,11 +146,7 @@ export class OpenAICompatibleClient extends LLMClient {
   override async chatPlain(messages: ChatMessage[], o: PlainOptions): Promise<string> {
     if (o.signal?.aborted) throw new CancelledError();
     const signal = o.signal ? AbortSignal.any([o.signal, AbortSignal.timeout(this.s.timeout_s * 1000)]) : AbortSignal.timeout(this.s.timeout_s * 1000);
-    // Servidores que no pueden pasar `chat_template_kwargs` (Ollama, LM Studio…): PLaMo acepta sus opciones en un mensaje de sistema.
-    const sys = plamoSystemMessage(o.extra);
-    const { chat_template_kwargs: _kw, ...rest } = o.extra ?? {};
-    const all = sys ? [sys, ...messages] : messages;
-    const body = { model: o.model, temperature: o.temperature ?? 0, max_tokens: o.maxTokens ?? 1024, messages: all.map((m) => ({ role: m.role, content: m.content })), ...(sys ? rest : (o.extra ?? {})) };
+    const body = { model: o.model, temperature: o.temperature ?? 0, max_tokens: o.maxTokens ?? 1024, messages: messages.map((m) => ({ role: m.role, content: m.content })), ...(o.extra ?? {}) };
     let res: Response;
     try {
       res = await fetch(this.url('/chat/completions'), { method: 'POST', headers: this.headers(), body: JSON.stringify(body), signal });
@@ -265,16 +264,6 @@ export class BuiltinClient extends OpenAICompatibleClient {
     this.lastStats = { tokens, seconds: Math.round(seconds * 100) / 100, tps: tokens ? Math.round((tokens / seconds) * 10) / 10 : 0 };
     return parts.join('');
   }
-}
-
-/** Opciones de PLaMo como mensaje de sistema «[plamo-translate]» (formato documentado en su ficha) cuando no se pueden pasar como plantilla. */
-export function plamoSystemMessage(extra: Record<string, unknown> | undefined): ChatMessage | null {
-  const kw = (extra?.chat_template_kwargs ?? {}) as { target_lang?: string; source_lang?: string; glossary?: { source: string; target: string }[] };
-  if (!kw.target_lang) return null;
-  const lines = ['[plamo-translate]', `target_lang=${kw.target_lang}`];
-  if (kw.source_lang) lines.push(`source_lang=${kw.source_lang}`);
-  for (const g of kw.glossary ?? []) lines.push(`glossary=${g.source} => ${g.target}`);
-  return { role: 'system', content: lines.join('\n') };
 }
 
 async function safeError(res: Response): Promise<string> {

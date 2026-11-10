@@ -11,7 +11,7 @@ Todavía no hay versiones publicadas. Cuando existan, esta tabla indicará cuál
 ## Cómo informar de una vulnerabilidad
 
 **No abras un issue público.** Usa el informe privado de GitHub (pestaña *Security* → *Report a vulnerability*) cuando
-esté habilitado en el repositorio. Mientras el repositorio sea privado, informa directamente al titular por el canal
+esté habilitado en el repositorio (es público). Si no lo está, informa directamente al titular por el canal
 habitual. Incluye versión, plataforma, pasos para reproducirlo e impacto. No incluyas tokens ni datos personales reales.
 
 ## Qué se considera en alcance

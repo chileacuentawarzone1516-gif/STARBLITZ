@@ -1,4 +1,4 @@
-# Validación de STARBLITZ en un entorno limpio (repositorio PRIVADO, solo para compilar y validar).
+# Validación de STARBLITZ en un entorno limpio (solo para compilar y validar; el repositorio es público desde, al menos, el 2026-11-09).
 #
 # Cada trabajo declara en su nombre QUÉ tipo de evidencia produce. No se mezclan:
 #   COMPILACIÓN        el artefacto se genera y su contenido se inspecciona; NO prueba que funcione.

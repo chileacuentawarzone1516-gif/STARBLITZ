@@ -199,6 +199,16 @@ describe('computeVisionFlags (qué modelos opcionales usa el procesamiento)', ()
   it('sin el detector instalado lo indica para que el procesamiento pida descargarlo', async () => {
     expect((await computeVisionFlags({ models: models([]), settings: defaultSettings(), caps: caps(8), mobile: true })).detector).toBe(false);
   });
+
+  it('detector EXPERIMENTAL: solo si se activa; si falta su modelo lo dice (no cambia de detector en silencio)', async () => {
+    const def = await computeVisionFlags({ models: models([...all, 'text-detector-manga']), settings: defaultSettings(), caps: caps(8), mobile: true });
+    expect(def).toMatchObject({ detectorKind: 'default', detector: true });          // por defecto, el de siempre aunque el ligero esté instalado
+    const light = { ...defaultSettings(), processing: { ...defaultSettings().processing, detector: 'manga-det' as const } };
+    expect(await computeVisionFlags({ models: models([...all, 'text-detector-manga']), settings: light, caps: caps(8), mobile: true }))
+      .toMatchObject({ detectorKind: 'manga-det', detector: true });
+    expect(await computeVisionFlags({ models: models(all), settings: light, caps: caps(8), mobile: true }))
+      .toMatchObject({ detectorKind: 'manga-det', detector: false });               // pedido pero sin instalar → «falta el modelo»
+  });
 });
 
 describe('WakeController (pantalla encendida solo mientras se trabaja)', () => {

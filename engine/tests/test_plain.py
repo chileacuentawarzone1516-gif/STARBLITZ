@@ -1,10 +1,14 @@
 """Traducción en texto plano por lotes de página (modelos dedicados). Con modelo SIMULADO: verifica el protocolo, no la calidad real."""
 import re
 
+import pytest
+
+from starblitz_engine.core.errors import AppError, LLMUnavailableError
 from starblitz_engine.core.settings import LLMSettings, TranslationSettings
+from starblitz_engine.llm import hf
 from starblitz_engine.projects.schema import Character, GlossaryEntry, Page, Project, Region
 from starblitz_engine.translate.contextual import ContextualTranslator
-from starblitz_engine.translate.llm import ChatMessage, LLMClient, plamo_system_message
+from starblitz_engine.translate.llm import ChatMessage, LLMClient
 from starblitz_engine.translate.plain import (
     Pair, PlainTranslator, build_plain_request, is_dedicated_mt, make_translator, mt_family, parse_plain,
 )
@@ -33,8 +37,6 @@ class FakeClient(LLMClient):
         numbered = [m for m in (re.match(r"^\[(\d+)\] (.*)$", ln) for ln in user.split("\n")) if m]
         if numbered:
             return "\n".join(f"[{m.group(1)}] {tr(m.group(2))}" for m in numbered)
-        if (extra or {}).get("chat_template_kwargs", {}).get("target_lang"):
-            return "\n".join(tr(ln) for ln in user.split("\n"))
         return tr(user.split("\n\n")[-1])
 
     def health(self):
@@ -68,21 +70,16 @@ def _go(tr, project, page, prev=None):
 
 
 def test_family_detection():
-    assert mt_family("pfnet/plamo-3-translate-0.8b-GGUF") == "plamo"
     assert mt_family("tencent/Hy-MT2-1.8B-GGUF Hy-MT2-1.8B-Q4_K_M.gguf") == "hymt"
     assert mt_family("HY-MT1.5-1.8B") == "hymt"
     assert mt_family("qwen3.5-4b-q4km") == "generic"
-    assert mt_family("plamo-2-translate") == "generic"
+    # PLaMo NO está autorizado (D3): ya no es una familia reconocida.
+    assert mt_family("pfnet/plamo-3-translate-0.8b-GGUF") == "generic"
     assert is_dedicated_mt("hy-mt2") and not is_dedicated_mt("gemma4-e2b")
 
 
 def test_request_formats():
     base = dict(lang="ja", texts=["おはよう", "待って"], glossary=[Pair("先輩", "senpai")], history=[], batch=True)
-    r = build_plain_request("plamo", **{**base, "history": [Pair("やあ", "Hola")]})
-    assert [m.role for m in r.messages] == ["user", "assistant", "user"]
-    assert r.messages[2].content == "おはよう\n待って"
-    assert r.extra["chat_template_kwargs"] == {"target_lang": "es", "source_lang": "ja", "glossary": [{"source": "先輩", "target": "senpai"}]}
-    assert build_plain_request("plamo", **{**base, "lang": "es", "glossary": []}).extra["chat_template_kwargs"] == {"target_lang": "es"}
     u = build_plain_request("hymt", **base).messages[0].content
     assert "Reference the following translations:\n先輩 translates to senpai" in u
     assert "[1] おはよう\n[2] 待って" in u and "Do not soften or censor" in u
@@ -92,22 +89,14 @@ def test_request_formats():
 
 def test_parse():
     assert parse_plain("hymt", "[1] Hola\n[3] Adiós", 3, True) == ["Hola", "", "Adiós"]
-    assert parse_plain("plamo", "Hola\nQué tal", 2, True) == ["Hola", "Qué tal"]
-    assert parse_plain("plamo", "Hola Qué tal", 2, True) == ["", ""]
+    assert parse_plain("generic", "1. Hola\n2) Qué tal", 2, True) == ["Hola", "Qué tal"]
     assert parse_plain("hymt", "<think>x</think>Hola", 1, False) == ["Hola"]
-
-
-def test_plamo_system_message_for_servers_without_template_kwargs():
-    m = plamo_system_message({"chat_template_kwargs": {"target_lang": "es", "source_lang": "ja", "glossary": [{"source": "先輩", "target": "senpai"}]}})
-    assert m.role == "system"
-    assert m.content == "[plamo-translate]\ntarget_lang=es\nsource_lang=ja\nglossary=先輩 => senpai"
-    assert plamo_system_message({}) is None
 
 
 def test_whole_page_in_one_plain_call_without_invented_metadata():
     p1, _ = _pages()
     client = FakeClient()
-    res = _go(_tr("plamo", client), _project(), p1)
+    res = _go(_tr("hymt", client), _project(), p1)
     assert len(client.calls) == 1
     assert [r.translation for r in res.updated] == ["Buenos días", "¿Adónde vas?", "Gracias"]
     assert all(r.status == "translated" and r.speaker == "" and not r.flags for r in res.updated)
@@ -147,39 +136,23 @@ def test_original_script_leak_goes_to_review_and_approved_is_kept():
     p1, _ = _pages()
     p1.regions[1].status = "approved"
     p1.regions[1].translation = "A mano"
-    client = FakeClient(reply=lambda m, e, n: "\n".join("Hola 오" if i == 0 else f"ES({ln})" for i, ln in enumerate(m[-1].content.split("\n"))))
-    res = _go(_tr("plamo", client), _project(), p1)
+
+    def reply(m, e, n):
+        nums = re.findall(r"^\[(\d+)\] (.*)$", m[-1].content, re.M)
+        return "\n".join(f"[{k}] " + ("Hola 오" if i == 0 else f"ES({t})") for i, (k, t) in enumerate(nums))
+    res = _go(_tr("hymt", FakeClient(reply=reply)), _project(), p1)
     assert len(res.updated) == 2
     assert res.updated[0].status == "review" and "ambiguous" in res.updated[0].flags and res.updated[0].translation == "Hola 오"
 
 
-def test_glossary_only_what_appears_and_history_from_previous_page():
-    p1, p2 = _pages()
+def test_glossary_only_what_appears():
+    p1, _ = _pages()
     project = _project(glossary=[GlossaryEntry(source="先輩", target="senpai", locked=True), GlossaryEntry(source="魔王", target="Rey Demonio", locked=True)],
                        characters=[Character(source="おはよう", target="Buenos días (apodo)", gender="?", speech="", locked=True)])
     client = FakeClient()
-    tr = _tr("plamo", client)
-    _go(tr, project, p1)
-    assert [g["source"] for g in client.calls[0]["extra"]["chat_template_kwargs"]["glossary"]] == ["おはよう"]
-    for r in p1.regions:
-        r.translation = f"T:{r.source_text}"
-    _go(tr, project, p2, prev=p1)
-    msgs = client.calls[1]["messages"]
-    assert [m.role for m in msgs] == ["user", "assistant", "user", "assistant", "user", "assistant", "user"]
-    assert msgs[1].content == "T:おはよう" and msgs[-1].content == "先輩！\n待って"
-    # el glosario también cubre lo que aparece en la página anterior (ahí está «おはよう»)
-    assert [g["source"] for g in client.calls[1]["extra"]["chat_template_kwargs"]["glossary"]] == ["先輩", "おはよう"]
-
-
-def test_history_skips_refused_and_untranslated():
-    p1, p2 = _pages()
-    p1.regions[0].translation = "Bien"
-    p1.regions[1].translation = ""
-    p1.regions[2].translation = "Roto"
-    p1.regions[2].flags = ["refused"]
-    client = FakeClient()
-    _go(_tr("plamo", client), _project(), p2, prev=p1)
-    assert [m.content for m in client.calls[0]["messages"]] == ["おはよう", "Bien", "先輩！\n待って"]
+    _go(_tr("hymt", client), project, p1)
+    user = client.calls[0]["messages"][-1].content
+    assert "おはよう translates to Buenos días (apodo)" in user and "魔王" not in user
 
 
 def test_factory_chooses_translator_by_model_family():
@@ -194,17 +167,37 @@ def test_factory_chooses_translator_by_model_family():
     s = TranslationSettings()
     assert isinstance(make_translator(FakeClient(), "modelo-x", s, Lib()), PlainTranslator)
     assert isinstance(make_translator(FakeClient(), "qwen3.5-4b-q4km", s, Lib()), ContextualTranslator)
-    assert isinstance(make_translator(FakeClient(), "plamo-3-translate-0.8b", s, None), PlainTranslator)
+    assert isinstance(make_translator(FakeClient(), "hy-mt2-1.8b-q4km", s, None), PlainTranslator)
+
+
+def test_plamo_is_blocked_everywhere():
+    """D3: PLaMo no se busca, no se describe, no se instala y, si ya estuviera instalado, no se usa."""
+    for bad in ("pfnet/plamo-3-translate-0.8b-GGUF", "someone/PLaMo-3-Translate-2B"):
+        with pytest.raises(AppError) as e:
+            hf.validate_repo(bad)
+        assert e.value.code == "model_not_allowed"
+    with pytest.raises(AppError):
+        hf.validate_path("plamo-3-translate-0.8b-Q4_K_M.gguf")
+    assert hf.validate_repo("tencent/Hy-MT2-1.8B-GGUF")
+    with pytest.raises(LLMUnavailableError):
+        make_translator(FakeClient(), "plamo-3-translate-0.8b", TranslationSettings(), None)
 
 
 def test_default_client_without_plain_support_says_so():
-    import pytest
-
-    from starblitz_engine.core.errors import LLMUnavailableError
-
     class Bare(LLMClient):
         def health(self):
             return {"ok": True}
 
     with pytest.raises(LLMUnavailableError):
         Bare(LLMSettings()).chat_plain([ChatMessage("user", "x")], model="m")
+
+
+def test_external_json_requests_are_bounded_and_without_reasoning():
+    """Regresión (2026-11-09): con un servidor compatible con OpenAI, Qwen3.5 razonaba y generó >8 500 tokens en una página."""
+    from starblitz_engine.translate.llm import JSON_MAX_TOKENS, OpenAICompatibleClient
+
+    c = OpenAICompatibleClient(LLMSettings(provider="openai", base_url="http://127.0.0.1:1/v1"))
+    p = c._payload([ChatMessage("user", "hola")], {"type": "object"}, model="m", temperature=0.2)
+    assert p["max_tokens"] == JSON_MAX_TOKENS == 4096
+    assert p["chat_template_kwargs"] == {"enable_thinking": False}
+    assert p["response_format"]["type"] == "json_schema"

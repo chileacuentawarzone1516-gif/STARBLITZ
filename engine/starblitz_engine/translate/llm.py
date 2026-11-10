@@ -29,6 +29,10 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.S)
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.S)
 
 
+# Tope de salida de una respuesta JSON (traducción de una página); el mismo que usa el motor integrado.
+JSON_MAX_TOKENS = 4096
+
+
 @dataclass
 class ChatMessage:
     role: str
@@ -152,7 +156,7 @@ class OllamaClient(LLMClient):
             "format": schema,
             "keep_alive": "20m",
             "options": {"temperature": temperature, "num_ctx": self.s.context_window, "top_p": 0.9,
-                        "repeat_penalty": 1.05},
+                        "repeat_penalty": 1.05, "num_predict": JSON_MAX_TOKENS},
             "messages": [self._message(m, info.vision) for m in messages],
         }
         if info.thinking:
@@ -174,8 +178,7 @@ class OllamaClient(LLMClient):
                    extra: dict | None = None, cancel: threading.Event | None = None) -> str:
         if cancel and cancel.is_set():
             raise CancelledError()
-        sysmsg = plamo_system_message(extra)
-        msgs = ([sysmsg] if sysmsg else []) + list(messages)
+        msgs = list(messages)
         payload: dict[str, Any] = {
             "model": model, "stream": False, "keep_alive": "20m",
             "options": {"temperature": temperature, "num_ctx": self.s.context_window, "num_predict": max_tokens},
@@ -239,17 +242,18 @@ class OpenAICompatibleClient(LLMClient):
             "temperature": temperature,
             "messages": [{"role": m.role, "content": content(m)} for m in messages],
             "response_format": {"type": "json_schema", "json_schema": {"name": "respuesta", "schema": schema, "strict": True}},
+            # Igual que el motor integrado: sin tope ni «enable_thinking=False», Qwen3.5 en un servidor externo (llama.cpp, LM Studio,
+            # vLLM) razona y puede generar miles de tokens por página (medido el 2026-11-09: >8 500 en una sola llamada).
+            "max_tokens": JSON_MAX_TOKENS,
+            "chat_template_kwargs": {"enable_thinking": False},
         }
 
     def chat_plain(self, messages: list[ChatMessage], *, model: str, temperature: float = 0.0, max_tokens: int = 1024,
                    extra: dict | None = None, cancel: threading.Event | None = None) -> str:
         if cancel and cancel.is_set():
             raise CancelledError()
-        sysmsg = plamo_system_message(extra)
-        msgs = ([sysmsg] if sysmsg else []) + list(messages)
         payload = {"model": model, "temperature": temperature, "max_tokens": max_tokens,
-                   "messages": [{"role": m.role, "content": m.content} for m in msgs],
-                   **(_without_kwargs(extra) if sysmsg else (extra or {}))}
+                   "messages": [{"role": m.role, "content": m.content} for m in messages], **(extra or {})}
         try:
             r = httpx.post(self._url("/chat/completions"), json=payload, headers=self._headers(), timeout=self._timeout())
         except httpx.HTTPError as exc:
@@ -360,24 +364,6 @@ class BuiltinClient(OpenAICompatibleClient):
             self.last_stats = {"tokens": tokens, "seconds": round(elapsed, 2),
                                "tps": round(tokens / elapsed, 1) if tokens else 0.0}
             return "".join(parts)
-
-
-def plamo_system_message(extra: dict | None) -> ChatMessage | None:
-    """Servidores que no pueden pasar `chat_template_kwargs` (Ollama, LM Studio…): PLaMo acepta sus opciones en un mensaje de sistema
-    que empieza por «[plamo-translate]» (ver la ficha del modelo)."""
-    kw = (extra or {}).get("chat_template_kwargs") or {}
-    if not kw.get("target_lang"):
-        return None
-    lines = ["[plamo-translate]", f"target_lang={kw['target_lang']}"]
-    if kw.get("source_lang"):
-        lines.append(f"source_lang={kw['source_lang']}")
-    for g in kw.get("glossary") or []:
-        lines.append(f"glossary={g['source']} => {g['target']}")
-    return ChatMessage("system", "\n".join(lines))
-
-
-def _without_kwargs(extra: dict | None) -> dict:
-    return {k: v for k, v in (extra or {}).items() if k != "chat_template_kwargs"}
 
 
 def create_client(settings: LLMSettings, runtime=None, library=None) -> LLMClient:

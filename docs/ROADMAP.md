@@ -7,14 +7,15 @@ Leyenda de estado: 🔨 compilado · 🧪 pruebas automáticas o simuladas · �
 
 | Área | Estado |
 |---|---|
-| Motor Python (importación, visión, OCR, traducción, reconstrucción) | 🧪 |
+| Motor Python (importación, visión, OCR, traducción, reconstrucción) | 🧪 + capítulo real en PC (CPU) con Qwen3.5-4B: [EVALUACION-CORPUS-USM](EVALUACION-CORPUS-USM.md) |
 | Desktop: versión portátil | 🔨 (generada en el equipo del titular) |
-| Desktop: instalador NSIS | ⏳ no generado ni probado |
+| Desktop: instalador NSIS | 🔨 generado e instalado/desinstalado en el runner Windows de CI (`windows.yml` #1, `a35c252`); ⏳ en un PC real |
 | Desktop en Windows con GPU y modelos reales | ⏳ |
 | Mobile: motor TypeScript, E2E en Chromium | 🧪 |
-| Mobile: APK compilado e instalado | ⏳ |
+| Mobile: APK compilado | 🔨 en CI con clave **desechable** (`android.yml`, verificación estática); ⏳ instalado en un teléfono real |
 | Mobile: `llama-server` arm64 en teléfono real | ⏳ |
-| Calidad de traducción con modelos reales | ⏳ sin medir |
+| Calidad de traducción con modelos reales | ⏳ sin evaluación humana (revisión preliminar no nativa en [EVALUACION-CORPUS-USM](EVALUACION-CORPUS-USM.md)) |
+| Repositorio de código | **público** (comprobado 2026-11-09); rama `test/windows-ci`; sin `main`, sin Releases |
 
 ## Próximos hitos de entrega
 
@@ -36,7 +37,10 @@ Detalle y estado por etapa en [MOTOR-AUDITORIA](MOTOR-AUDITORIA.md), [MODELOS-IN
 | Medición por etapa y por página + informe JSON exportable | 🧪 implementada; ⏳ falta medir en el Redmi Note 8 Pro ([protocolo](VALIDACION-FASE4-ANDROID.md)) |
 | Cola persistente, caché de OCR y de traducciones, concurrencia por RAM, liberación de memoria (móvil) | 🧪 implementada y probada con piezas simuladas; ⏳ sin medir en el teléfono; ⏳ aviso de la cola en la interfaz |
 | Control térmico adaptativo (estado/margen térmico de Android) | 🧪 implementado y probado con señales simuladas; ⏳ sin calibrar ni medir en el teléfono ([protocolo](VALIDACION-TERMICA-ANDROID.md)) |
-| Auditoría de la visión (cuello de botella: detector de texto) | 🧪 medida en PC; ⏳ falta el desglose en el Redmi; detector ligero **no** integrado ([OPTIMIZACION-ANDROID](OPTIMIZACION-ANDROID.md)) |
+| Auditoría de la visión (cuello de botella: detector de texto) | 🧪 medida en PC; ⏳ falta el desglose en el Redmi ([OPTIMIZACION-ANDROID](OPTIMIZACION-ANDROID.md)) |
+| Detector ligero PP-OCRv6 Manga (**experimental**, desactivado por defecto) | 🧪 integrado detrás de un ajuste y comparado con un capítulo real en PC ([DETECTOR-EXPERIMENTAL](DETECTOR-EXPERIMENTAL.md)); ⏳ manga/manhwa reales (ja/ko) |
+| Escritorio en CPU: números desnormalizados en el detector por defecto | ✅ corregido (salida idéntica bit a bit, ~100× más rápido en CPU; ver [EVALUACION-CORPUS-USM](EVALUACION-CORPUS-USM.md)) |
+| PLaMo 3 Translate | retirado del código (D3: no autorizado) |
 | Segundo plano en Android (servicio en primer plano) | ⏳ diseño (no implementado) |
 | Estilo visual del texto | ⏳ diseño |
 | Actualizador integrado | 🧪 comparación de versiones y validación del manifiesto; ⏳ descarga e instalación (decisiones pendientes) |

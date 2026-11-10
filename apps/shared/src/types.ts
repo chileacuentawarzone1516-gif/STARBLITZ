@@ -448,7 +448,11 @@ export interface Settings {
     max_pages: number;
     inpaint: 'auto' | 'lama' | 'fast';
     profile: 'auto' | Tier;
+    /** EXPERIMENTAL: «manga-det» = detector ligero PP-OCRv6 Manga (si está instalado). Por defecto, el de siempre. */
+    detector?: DetectorKind;
   };
 }
+
+export type DetectorKind = 'default' | 'manga-det';
 
 export type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };

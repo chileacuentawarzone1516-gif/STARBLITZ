@@ -65,7 +65,7 @@
    "license": "Apache-2.0",
    "context_native": 8192,
    "tiers": [],
-   "summary": "Modelo de traducción dedicado de Tencent (1,1 GB) con licencia Apache-2.0 y 33 idiomas, incluidos japonés, coreano y español. En las pruebas en PC fue más fiel y mucho más rápido que Qwen 2B, y menos fiel que PLaMo en japonés. Admite terminología (glosario). Sin medir aún en el teléfono.",
+   "summary": "Modelo de traducción dedicado de Tencent (1,1 GB) con licencia Apache-2.0 y 33 idiomas, incluidos japonés, coreano y español. En las pruebas en PC fue más fiel y mucho más rápido que Qwen 2B. Admite terminología (glosario). Sin medir aún en el teléfono.",
    "languages": "33 idiomas (japonés, coreano, inglés, español…)",
    "tags": [
     "traducción dedicada",

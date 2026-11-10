@@ -6,6 +6,8 @@ import type { InpaintMode } from '../render/inpaint';
 /** Qué modelos opcionales se pueden usar ahora (instalados y permitidos por el perfil del dispositivo). */
 export interface VisionFlags {
   detector: boolean;
+  /** Detector elegido (EXPERIMENTAL: «manga-det» solo si se activó en Ajustes y está instalado). */
+  detectorKind?: 'default' | 'manga-det';
   manga: boolean;
   lama: boolean;
   inpaintMode: InpaintMode;

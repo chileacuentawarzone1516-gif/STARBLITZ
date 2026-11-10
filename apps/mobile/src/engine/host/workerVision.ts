@@ -147,7 +147,9 @@ export class WorkerVision implements VisionPort {
   /** Qué motor de lectura se usaría para este idioma (parte de la clave de la caché de OCR). */
   async fingerprint(lang: string): Promise<string> {
     const f = await this.flags();
-    return lang === 'ja' && f.manga ? 'manga-ocr' : `ppocr-${lang}`;
+    const ocr = lang === 'ja' && f.manga ? 'manga-ocr' : `ppocr-${lang}`;
+    // Igual que `VisionService.fingerprint`: el detector experimental da otro análisis y entra en la clave de la caché.
+    return f.detectorKind === 'manga-det' ? `${ocr}+manga-det` : ocr;
   }
 
   /** Poca memoria: el worker suelta los modelos grandes opcionales (Manga OCR, LaMa) y los recarga si hacen falta. */

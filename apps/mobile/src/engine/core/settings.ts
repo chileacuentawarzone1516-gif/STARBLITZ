@@ -8,7 +8,7 @@ export const defaultSettings = (): Settings => ({
     use_vision: true, timeout_s: 600, idle_unload_minutes: 10, api_key: '', hf_token: '',
   },
   translation: { target_variant: 'es-419', quality: 'auto', honorifics: 'adapt', sfx: 'keep', review_threshold: 0.72, profile: 'natural', dictionary: [] },
-  processing: { device: 'auto', max_pages: 50, inpaint: 'auto', profile: 'auto' },
+  processing: { device: 'auto', max_pages: 50, inpaint: 'auto', profile: 'auto', detector: 'default' },
 });
 
 const RULES: Record<string, [string, number, number] | string[]> = {
@@ -18,7 +18,7 @@ const RULES: Record<string, [string, number, number] | string[]> = {
   'llm.provider': ['builtin', 'ollama', 'openai'], 'translation.target_variant': ['es-419', 'es-ES'],
   'translation.quality': ['auto', 'balanced', 'max'], 'translation.honorifics': ['adapt', 'keep'], 'translation.sfx': ['keep', 'note'], 'translation.profile': ['natural', 'fiel', 'coloquial', 'formal', 'adaptacion'],
   'processing.device': ['auto', 'gpu', 'cpu'], 'processing.inpaint': ['auto', 'lama', 'fast'],
-  'processing.profile': ['auto', 'low', 'mid', 'high', 'pc-gpu'],
+  'processing.profile': ['auto', 'low', 'mid', 'high', 'pc-gpu'], 'processing.detector': ['default', 'manga-det'],
 };
 
 export const MAX_DICTIONARY = 500;

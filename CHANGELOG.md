@@ -13,12 +13,35 @@ las pruebas de [docs/PRUEBAS-HARDWARE.md](docs/PRUEBAS-HARDWARE.md).
 
 ### Añadido
 
+- **Detector de texto experimental PP-OCRv6 Manga (PC y móvil), desactivado por defecto:** `processing.detector = "manga-det"`
+  (Ajustes → Procesamiento) y modelo opcional `text-detector-manga` (1,8 MB, revisión v0.3 fijada con SHA-256). El modelo solo detecta
+  líneas; la agrupación en bloques y la máscara de trazos las hace STARBLITZ, con paridad Python ↔ TypeScript. El detector predeterminado
+  **no cambia**. Ver [docs/DETECTOR-EXPERIMENTAL.md](docs/DETECTOR-EXPERIMENTAL.md).
+- **Evaluación con un capítulo real** (`tools/bench/corpus_eval.py`, `corpus_compare.py`, `export_render.mjs`): pipeline completo del motor de
+  escritorio con desglose por etapa y página, RAM/CPU y exportación con el renderizador compartido. Resultados en
+  [docs/EVALUACION-CORPUS-USM.md](docs/EVALUACION-CORPUS-USM.md) (cómic en inglés; sin japonés ni coreano).
+
+### Corregido
+
+- **Escritorio en CPU ~100× más lento de lo debido:** los pesos de `comic-text-detector` contienen números desnormalizados; ONNX Runtime 1.31
+  en CPU tardaba 103 s por página. Ahora las sesiones tratan los desnormalizados como cero (0,9 s; salida idéntica bit a bit).
+- **Traducción desbocada con servidores externos** (compatibles con OpenAI y Ollama): la petición JSON no limitaba la salida ni desactivaba el
+  razonamiento; Qwen3.5 llegó a generar más de 8 500 tokens para una página. Ahora: tope de 4 096 tokens y `enable_thinking=false`, como el
+  motor integrado.
+
+### Retirado
+
+- **PLaMo 3 Translate** (decisión D3, no autorizado): sin reconocimiento por nombre ni plantilla propia; búsqueda, descripción, instalación y
+  uso bloqueados en móvil y PC; fuera del banco de pruebas (sus medidas del 2026-11-08 quedan como registro histórico).
+
+### Añadido (anterior)
+
 - **Auditoría de la visión y control térmico (móvil):** desglose de tiempos del análisis por página (decodificar, detector, viñetas, OCR, tramos) en el informe exportable;
   `ThermalPacer`: descansos adaptativos según el estado térmico y el margen térmico de Android (o solo la batería si no hay API), con estadísticas de throttling; el plugin nativo
   informa `thermal_headroom`. **Medido en PC:** el detector de texto es ~80–86 % del análisis; el detector ligero de PP-OCRv6 Manga es ~14–19× más rápido en inferencia
   (no integrado: falta validar precisión con páginas reales). Parámetros térmicos **sin calibrar** y sin medir en el teléfono. Ver [docs/OPTIMIZACION-ANDROID.md](docs/OPTIMIZACION-ANDROID.md).
 
-- **Traducción en texto plano por lotes (móvil y PC):** `PlainTranslator` para modelos de traducción dedicados (PLaMo 3 Translate, Hy-MT2): una llamada por
+- **Traducción en texto plano por lotes (móvil y PC):** `PlainTranslator` para modelos de traducción dedicados (Hy-MT2; el soporte de PLaMo se retiró el 2026-11-09, D3): una llamada por
   página con el formato nativo del modelo, glosario e historial como contexto, reintento solo de lo que falte y nada vacío ni aceptado si el modelo se niega.
   Medido en PC: el formato actual cuesta ~1 070 tokens de entrada y ~350 de salida por página con Qwen3.5-4B; en texto plano, ~200 y ~45; con PLaMo-0.8B, ~55 y ~42.
   Los demás modelos siguen con el traductor contextual. Catálogo: añadido Hy-MT2-1.8B (Apache-2.0); sin cambiar el modelo recomendado.

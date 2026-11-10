@@ -17,8 +17,9 @@ Qué NO mide:
 
 Uso (ejemplo):
   python bench_translate.py --server llama-server.exe --model Hy-MT2-1.8B-Q4_K_M.gguf --profile hymt2 --mode per --out r.json
-Perfiles: qwen (instrucción genérica), hymt2 (formato nativo de Hy-MT2), plamo (plantilla nativa PFML3), app (el prompt y el
-esquema JSON reales de STARBLITZ, página = escena).
+Perfiles: qwen (instrucción genérica), hymt2 (formato nativo de Hy-MT2), app (el prompt y el esquema JSON reales de
+STARBLITZ, página = escena). El perfil de PLaMo se retiró el 2026-11-09 (D3: no autorizado); sus medidas históricas
+siguen en results/2026-11-08-* solo como registro.
 Modos: per (una llamada por segmento), batch (una llamada por escena, líneas numeradas). `--gloss` añade el glosario de la escena.
 """
 import argparse, json, os, re, subprocess, sys, threading, time, unicodedata, urllib.request
@@ -108,12 +109,6 @@ def gloss_lines(gl):
 def build(profile, lang, texts, gloss, batch):
     """Devuelve el cuerpo de /v1/chat/completions."""
     base = {'temperature': 0, 'max_tokens': 1024, 'cache_prompt': True, 'stream': False}
-    if profile == 'plamo':
-        kw = {'target_lang': 'es', 'source_lang': lang}
-        if gloss:
-            kw['glossary'] = [{'source': s, 'target': t} for s, t in gloss]
-        return {**base, 'messages': [{'role': 'user', 'content': '\n'.join(texts)}], 'chat_template_kwargs': kw,
-                'stop': ['<|plamo:tag|>', '<|plamo:bos|>']}
     numbered = '\n'.join(f'[{i + 1}] {t}' for i, t in enumerate(texts))
     if profile == 'hymt2':
         pre = ''
@@ -169,9 +164,6 @@ def parse(profile, content, n, batch):
             return [''] * n
     if not batch:
         return [content]
-    if profile == 'plamo':
-        lines = [l for l in content.split('\n') if l.strip()]
-        return [lines[i] if i < len(lines) else '' for i in range(n)]
     got = {}
     for line in content.split('\n'):
         m = re.match(r'^\s*\[?(\d+)[\]\.\):]\s*(.*)$', line)
@@ -206,7 +198,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--server', required=True)
     ap.add_argument('--model', required=True)
-    ap.add_argument('--profile', required=True, choices=['qwen', 'hymt2', 'plamo', 'app'])
+    ap.add_argument('--profile', required=True, choices=['qwen', 'hymt2', 'app'])
     ap.add_argument('--mode', choices=['per', 'batch'], default='per')
     ap.add_argument('--gloss', action='store_true', help='añade el glosario de la escena (solo escenas que lo definen)')
     ap.add_argument('--lang', choices=['ja', 'ko', 'all'], default='all')

@@ -20,11 +20,16 @@ export async function computeVisionFlags(i: FlagInputs): Promise<VisionFlags> {
   const profile = currentProfile(i.caps, i.settings.processing.profile, i.mobile);
   const chosen = i.settings.processing.inpaint;
   const inpaintMode = chosen === 'auto' ? profile.inpaint : chosen;
-  const [detector, mangaInstalled, lamaInstalled] = await Promise.all([
-    i.models.isInstalled('text-detector'), i.models.isInstalled('manga-ocr'), i.models.isInstalled('lama'),
+  const wantLight = i.settings.processing.detector === 'manga-det';
+  const [defaultDet, lightDet, mangaInstalled, lamaInstalled] = await Promise.all([
+    i.models.isInstalled('text-detector'), wantLight ? i.models.isInstalled('text-detector-manga') : Promise.resolve(false),
+    i.models.isInstalled('manga-ocr'), i.models.isInstalled('lama'),
   ]);
+  // Igual que el motor del PC: si se pidió el experimental y no está instalado, el análisis avisa de que falta (no se cambia en silencio).
+  const detectorKind = wantLight ? 'manga-det' : 'default';
   return {
-    detector,
+    detector: detectorKind === 'manga-det' ? lightDet : defaultDet,
+    detectorKind,
     manga: profile.ocr_japanese === 'manga-ocr' && mangaInstalled,
     lama: inpaintMode !== 'fast' && lamaInstalled,
     inpaintMode,

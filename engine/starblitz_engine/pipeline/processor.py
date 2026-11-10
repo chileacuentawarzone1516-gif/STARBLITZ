@@ -34,6 +34,7 @@ from ..translate.plain import make_translator
 from ..translate.llm import create_client
 from ..vision.bubbles import find_bubble, text_ring_stats
 from ..vision.detector import DetectedBlock, TextDetector
+from ..vision.manga_det import MangaLineDetector
 from ..vision.langid import direction_for, guess_from_blocks, guess_from_text
 from ..vision.layout import detect_panels, reading_order
 from ..vision.ocr.router import OCRRouter
@@ -55,7 +56,8 @@ class Processor:
         self.library = library
         self.runtime = runtime
         self._publish = publish or (lambda _e: None)
-        self._detector: TextDetector | None = None
+        self._detector: TextDetector | MangaLineDetector | None = None
+        self._detector_kind = settings.value.processing.detector
         self._device = settings.value.processing.device
         self._ocr = OCRRouter(models, self._device)
         self._inpainter = Inpainter(models, self._device, self._inpaint_mode())
@@ -72,6 +74,9 @@ class Processor:
     def refresh_settings(self) -> None:
         s = self.settings.value.processing
         with self._lock:
+            if s.detector != self._detector_kind:
+                self._detector_kind = s.detector
+                self._detector = None
             if s.device != self._device:
                 self._device = s.device
                 self._detector = None
@@ -80,12 +85,18 @@ class Processor:
             else:
                 self._inpainter.mode = self._inpaint_mode()
 
-    def detector(self) -> TextDetector:
+    def detector(self) -> TextDetector | MangaLineDetector:
+        """Detector elegido. El experimental (PP-OCRv6 Manga) solo se usa si se activó en los ajustes."""
         with self._lock:
             if self._detector is None:
-                if not self.models.is_installed("text-detector"):
-                    raise ModelMissingError("text-detector", "Detector de texto")
-                self._detector = TextDetector(self.models.path("text-detector", "comictextdetector.onnx"), self._device)
+                if self._detector_kind == "manga-det":
+                    if not self.models.is_installed("text-detector-manga"):
+                        raise ModelMissingError("text-detector-manga", "Detector ligero PP-OCRv6 Manga (experimental)")
+                    self._detector = MangaLineDetector(self.models.path("text-detector-manga", "manga_det.onnx"), self._device)
+                else:
+                    if not self.models.is_installed("text-detector"):
+                        raise ModelMissingError("text-detector", "Detector de texto")
+                    self._detector = TextDetector(self.models.path("text-detector", "comictextdetector.onnx"), self._device)
             return self._detector
 
     def llm_model(self) -> str:
@@ -444,7 +455,7 @@ class Processor:
         s = self.settings.value
         quality = self.profile().quality if s.translation.quality == "auto" else s.translation.quality
         client = create_client(s.llm, self.runtime, self.library)
-        # Los modelos de traducción dedicados (PLaMo 3 Translate, Hy-MT2…) usan el formato de texto plano; el resto, el contextual.
+        # Los modelos de traducción dedicados (Hy-MT2) usan el formato de texto plano; el resto, el contextual.
         return make_translator(client, self.llm_model(), s.translation.model_copy(update={"quality": quality}), self.library)
 
     def translate_single(self, project_id: str, page_id: str, region_ids: list[str]) -> list[Region]:

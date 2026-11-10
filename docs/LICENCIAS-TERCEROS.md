@@ -8,6 +8,7 @@ redistribuir modelos o paquetes.
 | Componente | Licencia | Fuente |
 |---|---|---|
 | comic-text-detector (pesos ONNX) | **GPL‑3.0** | https://github.com/dmMaze/comic-text-detector · ONNX: https://github.com/zyddnys/manga-image-translator |
+| PP-OCRv6 Manga `manga_det` (detector **experimental**, opcional; revisión v0.3) | Apache‑2.0 **declarada**; entrenado con Manga109-s (condiciones del dataset no verificadas) | https://huggingface.co/Kellenok/PP-OCRv6_manga |
 | Manga OCR (kha-white) / exportación ONNX de onnx-community | Apache‑2.0 | https://github.com/kha-white/manga-ocr |
 | LaMa (Samsung AI Center) / exportación Carve/LaMa-ONNX | Apache‑2.0 | https://github.com/advimman/lama |
 | PP-OCR (PaddleOCR) vía RapidOCR — **incluido en el APK y en el escritorio** | Apache‑2.0 | https://github.com/RapidAI/RapidOCR (texto en `apps/mobile/public/models/PPOCR-*`) |
@@ -17,7 +18,7 @@ redistribuir modelos o paquetes.
 
 Sobre el detector (GPL‑3.0): no se redistribuye con la aplicación; lo descarga cada usuario desde su publicación original
 y la app lo trata como un componente independiente que se carga en tiempo de ejecución. Si redistribuyes STARBLITZ junto con
-ese archivo, tu distribución debe cumplir la GPL‑3.0 para ese componente.
+ese archivo, tu distribución debe cumplir la GPL‑3.0 para ese componente. Alternativas y riesgos: [DETECTOR-EXPERIMENTAL](DETECTOR-EXPERIMENTAL.md) §5.
 
 ## Software incluido
 

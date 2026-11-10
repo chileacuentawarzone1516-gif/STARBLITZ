@@ -65,6 +65,23 @@ REGISTRY: dict[str, ModelSpec] = {
             ),
         ),
         ModelSpec(
+            id="text-detector-manga",
+            label="Detector ligero PP-OCRv6 Manga (EXPERIMENTAL)",
+            purpose="detection",
+            description="Detector de LÍNEAS de texto de 1,8 MB. Experimental: solo se usa si lo activas en Ajustes → Procesamiento. "
+                        "El modelo no detecta globos ni da máscara de trazos: la agrupación en bloques y la máscara las hace STARBLITZ.",
+            license="Apache-2.0 (declarada en la ficha; entrenado con Manga109-s)",
+            homepage=f"{HF}/Kellenok/PP-OCRv6_manga",
+            files=(
+                ModelFile(
+                    "manga_det.onnx",
+                    (f"{HF}/Kellenok/PP-OCRv6_manga/resolve/v0.3/det/manga_det.onnx",),
+                    "97c434ae8deaad83513fb132b605d5085a3af8ffac2cb15e2aa096815c206172",
+                    1.8,
+                ),
+            ),
+        ),
+        ModelSpec(
             id="manga-ocr",
             label="Manga OCR (japonés)",
             purpose="ocr",

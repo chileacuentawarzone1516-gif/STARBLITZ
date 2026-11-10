@@ -193,6 +193,7 @@ describe('modelos de visión leídos por URL en el worker', () => {
     'http://localhost/files/models/manga-ocr/vocab.txt': 'a\nb',
     'http://localhost/files/models/manga-ocr/generation_config.json': '{"max_length":9}',
     'http://localhost/files/models/lama/lama_fp32.onnx': 'LAMA',
+    'http://localhost/files/models/text-detector-manga/manga_det.onnx': 'LIGHT',
   };
   const fetcher = async (url: string) => (url in files ? new Response(files[url]) : new Response('no', { status: 404 }));
   const dec = (b: Uint8Array | null | undefined) => new TextDecoder().decode(b ?? new Uint8Array());
@@ -211,6 +212,14 @@ describe('modelos de visión leídos por URL en el worker', () => {
     const m = await a.mangaOcr();
     expect([dec(m?.encoder), dec(m?.decoder), m?.vocab, m?.generationConfig]).toEqual(['ENC', 'DEC', 'a\nb', '{"max_length":9}']);
     expect(dec(await a.lama())).toBe('LAMA');
+  });
+
+  it('con el detector experimental activado lee SU modelo y lo anuncia (entra en la clave de la caché)', async () => {
+    const a = new UrlVisionAssets(config, () => ({ ...FLAGS, detectorKind: 'manga-det' }), fetcher);
+    expect(dec(await a.detector())).toBe('LIGHT');
+    expect(await a.detectorKind()).toBe('manga-det');
+    const missing = new UrlVisionAssets(config, () => ({ ...FLAGS, detector: false, detectorKind: 'manga-det' }), fetcher);
+    await expect(missing.detector()).rejects.toMatchObject({ details: { model_id: 'text-detector-manga' } });
   });
 
   it('sin el detector instalado falla con «falta el modelo», no con un error de red', async () => {

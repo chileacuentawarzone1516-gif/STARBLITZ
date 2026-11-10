@@ -118,9 +118,17 @@ export class DeviceVisionAssets implements VisionAssets {
     private loadPpocr: () => Promise<Uint8Array>,
     /** ¿Permite el perfil usar Manga OCR (≈460 MB en memoria)? */
     private mangaAllowed: () => Promise<boolean> = async () => true,
+    /** Detector elegido (EXPERIMENTAL: «manga-det»). */
+    private kind: () => Promise<'default' | 'manga-det'> = async () => 'default',
   ) {}
 
-  detector(): Promise<Uint8Array> { return this.manager.read('text-detector', 'comictextdetector.onnx'); }
+  async detector(): Promise<Uint8Array> {
+    return (await this.kind()) === 'manga-det'
+      ? this.manager.read('text-detector-manga', 'manga_det.onnx')
+      : this.manager.read('text-detector', 'comictextdetector.onnx');
+  }
+
+  detectorKind(): Promise<'default' | 'manga-det'> { return this.kind(); }
 
   ppocr(): Promise<Uint8Array> {
     this.ppocrBytes ??= this.loadPpocr().catch((e) => { this.ppocrBytes = null; throw e; });

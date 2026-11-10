@@ -104,8 +104,12 @@ Hoy (`makeRegion`) se infiere color claro/oscuro del fondo, contorno sobre dibuj
 
 ### Restricción
 
-El repositorio es **privado**. Una app instalada **no puede** consultar Releases privadas sin una credencial, y **no se
-incrustarán tokens** en la app (cualquiera podría extraerlos del APK/instalador). Tampoco se hará público el repositorio.
+> **Actualización 2026-11-09:** el repositorio de código es **público** (comprobado con la API de GitHub); la restricción de abajo
+> describe la situación del 2026-11-07 y queda como historia. Con el repositorio público, la app puede leer sus Releases sin
+> credencial; elegir entre este repositorio o uno aparte (`STARBLITZ-RELEASES`) sigue siendo decisión del titular.
+
+El repositorio era **privado** (2026-11-07). Una app instalada **no puede** consultar Releases privadas sin una credencial, y **no se
+incrustarán tokens** en la app (cualquiera podría extraerlos del APK/instalador).
 
 ### Alternativas
 

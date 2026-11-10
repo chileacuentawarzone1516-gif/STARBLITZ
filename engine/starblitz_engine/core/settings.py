@@ -67,6 +67,8 @@ class ProcessingSettings(BaseModel):
     max_pages: int = Field(50, ge=1, le=1000)
     inpaint: Literal["auto", "lama", "fast"] = "auto"
     profile: Literal["auto", "low", "mid", "high", "pc-gpu"] = "auto"  # perfil de rendimiento (auto = según el equipo)
+    # EXPERIMENTAL: «manga-det» usa el detector ligero PP-OCRv6 Manga (si está instalado). Por defecto, el de siempre.
+    detector: Literal["default", "manga-det"] = "default"
 
 
 class Settings(BaseModel):

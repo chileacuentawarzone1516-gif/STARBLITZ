@@ -53,7 +53,7 @@ export interface LibraryOptions {
   mobile?: boolean;
 }
 
-const HF_STATUS: Record<string, number> = { auth_required: 403, not_found: 404, invalid_repo: 422, invalid_file: 422, hf_unreachable: 503 };
+const HF_STATUS: Record<string, number> = { auth_required: 403, not_found: 404, invalid_repo: 422, invalid_file: 422, model_not_allowed: 403, hf_unreachable: 503 };
 
 /** Los errores de Hugging Face llevan mensajes pensados para la persona: se exponen como errores de dominio. */
 export function fromHf(e: unknown): unknown {

@@ -87,6 +87,8 @@ function ProcessingTab({ settings, update }: { settings: SettingsT; update: Upda
             onBlur={(e) => { const v = Math.max(1, Math.min(1000, +e.target.value || 50)); if (v !== p.max_pages) update({ processing: { max_pages: v } }); }} />
           <span className="hint">50 es el valor recomendado; más páginas tardan más pero no reducen la calidad.</span></div>
       </div>
+      <Toggle id="sp-det" checked={p.detector === 'manga-det'} onChange={(v) => update({ processing: { detector: v ? 'manga-det' : 'default' } })}
+        label="Detector de texto ligero (experimental)" hint="PP-OCRv6 Manga (1,8 MB; instálalo en Modelos → Visión). Mucho más rápido, pero aún sin validar con manga y manhwa reales. Si no está instalado, el análisis avisa de que falta." />
       <Toggle id="sp-auto" checked={p.profile === 'auto'} onChange={(v) => update({ processing: { profile: v ? 'auto' : 'mid' } })}
         label="Elegir el perfil de rendimiento automáticamente" hint="STARBLITZ mide la memoria y la GPU de este dispositivo. Desactívalo solo si quieres forzar un perfil." />
       {p.profile !== 'auto' && (

@@ -1,4 +1,4 @@
-"""Traducción «en texto plano» por lotes de página para modelos de traducción dedicados (PLaMo 3 Translate, Hy-MT2…).
+"""Traducción «en texto plano» por lotes de página para modelos de traducción dedicados (Hy-MT2).
 
 Equivalente exacto de `apps/mobile/src/engine/translate/plain.ts`. El traductor contextual pide un JSON con muchos campos por texto
 (≈ 1 100 tokens de SALIDA por página de 3–4 globos frente a ≈ 100 pidiendo solo la traducción: ver docs/ARQUITECTURA-TRADUCCION.md).
@@ -16,7 +16,7 @@ import re
 import threading
 from dataclasses import dataclass
 
-from ..core.errors import CancelledError
+from ..core.errors import CancelledError, LLMUnavailableError
 from ..core.settings import TranslationSettings
 from ..projects.schema import Page, Project, Region
 from .contextual import _REFUSAL, REVIEW_FLAGS, PageTranslation, _clean, effective_glossary
@@ -28,7 +28,6 @@ EN_NAMES = {"ja": "Japanese", "ko": "Korean", "zh": "Chinese", "en": "English", 
             "de": "German", "it": "Italian", "pt": "Portuguese", "ru": "Russian"}
 ES_NAMES = {"ja": "japonés", "ko": "coreano", "zh": "chino", "en": "inglés", "es": "español", "fr": "francés",
             "de": "alemán", "it": "italiano", "pt": "portugués", "ru": "ruso"}
-PLAMO_SOURCES = {"ja", "ko", "zh", "en", "fr", "de", "it", "pt", "ru"}
 _CJK = re.compile(r"[぀-ヿ㐀-鿿가-힯]")
 _ONLY_SYMBOLS = re.compile(r"^[\W_\s…]*$", re.U)
 
@@ -40,9 +39,7 @@ GENERIC_SYSTEM = (
 
 
 def mt_family(text: str) -> str:
-    """Familia de modelo a partir de su identificador, repositorio o archivo: «plamo», «hymt» o «generic»."""
-    if re.search(r"plamo[-_ ]?3[-_ ]?translate", text, re.I):
-        return "plamo"
+    """Familia de modelo a partir de su identificador, repositorio o archivo: «hymt» o «generic»."""
     if re.search(r"hy[-_ ]?mt", text, re.I):
         return "hymt"
     return "generic"
@@ -77,17 +74,6 @@ def build_plain_request(family: str, *, lang: str, texts: list[str], glossary: l
                         variant: str = "es-419") -> PlainRequest:
     """Petición con el formato nativo de cada familia."""
     max_tokens = _max_tokens(texts)
-    if family == "plamo":
-        kw: dict = {"target_lang": "es"}
-        if lang in PLAMO_SOURCES:
-            kw["source_lang"] = lang
-        if glossary:
-            kw["glossary"] = [{"source": g.source, "target": g.target} for g in glossary]
-        messages: list[ChatMessage] = []
-        for h in history:
-            messages += [ChatMessage("user", h.source), ChatMessage("assistant", h.target)]
-        messages.append(ChatMessage("user", "\n".join(texts)))
-        return PlainRequest(messages, {"chat_template_kwargs": kw, "stop": ["<|plamo:tag|>", "<|plamo:bos|>"]}, max_tokens)
     if family == "hymt":
         name = EN_NAMES.get(lang, lang)
         terms = ("Reference the following translations:\n" + "\n".join(f"{g.source} translates to {g.target}" for g in glossary) + "\n"
@@ -115,9 +101,6 @@ def parse_plain(family: str, content: str, n: int, batch: bool) -> list[str]:
     text = re.sub(r"<think>.*?</think>", "", content or "", flags=re.S).strip()
     if not batch or n == 1:
         return [text]
-    if family == "plamo":
-        lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
-        return lines if len(lines) == n else [""] * n
     got: dict[int, str] = {}
     for line in text.split("\n"):
         m = re.match(r"^\s*\[?(\d+)[\]\.\):]\s*(.*)$", line)
@@ -246,7 +229,11 @@ def make_translator(client: LLMClient, model: str, settings: TranslationSettings
             info = next((m for m in library.installed() if m.id == model), None)
         except Exception:  # noqa: BLE001
             info = None
-    family = mt_family(" ".join([model, getattr(info, "repo", "") or "", *(getattr(info, "files", None) or [])]))
+    identity = " ".join([model, getattr(info, "repo", "") or "", *(getattr(info, "files", None) or [])])
+    from ..llm.hf import BLOCKED_MODEL_MESSAGE, is_blocked_model
+    if is_blocked_model(identity):
+        raise LLMUnavailableError(BLOCKED_MODEL_MESSAGE)
+    family = mt_family(identity)
     if family != "generic":
         return PlainTranslator(client, model, family, settings)
     return ContextualTranslator(client, model, settings)

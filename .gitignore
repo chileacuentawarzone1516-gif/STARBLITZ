@@ -46,6 +46,7 @@ node_modules/
 dist/
 dist-electron/
 dist-e2e/
+dist-test/
 build/
 out/
 release/

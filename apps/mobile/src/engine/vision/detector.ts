@@ -155,7 +155,7 @@ function containment(a: Box, b: Box): number {
 }
 
 /** Entre tramos distintos, un rectángulo casi entero dentro de otro de mayor prioridad es el mismo texto recortado. */
-function dedupeAcross(rects: Box[], partOf: number[], priority: number[]): number[] {
+export function dedupeAcross(rects: Box[], partOf: number[], priority: number[]): number[] {
   const kept: number[] = [];
   const order = rects.map((_, i) => i).sort((a, b) => priority[b] - priority[a]);
   for (const i of order) {
@@ -331,7 +331,7 @@ function contains(box: Box, pt: [number, number], margin = 0): boolean {
 }
 
 /** Une líneas contiguas de un mismo párrafo (misma orientación, cuerpo similar, hueco pequeño y solape suficiente). */
-function clusterLines(lines: Poly[]): Poly[][] {
+export function clusterLines(lines: Poly[]): Poly[][] {
   const n = lines.length;
   const parent = Array.from({ length: n }, (_, i) => i);
   const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };

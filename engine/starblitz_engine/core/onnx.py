@@ -35,10 +35,20 @@ def _provider_chain(device: Device) -> list:
     return chain
 
 
-def create_session(model_path: Path, device: Device = "auto", threads: int = 0) -> ort.InferenceSession:
+def _base_options() -> ort.SessionOptions:
     opts = ort.SessionOptions()
     opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     opts.log_severity_level = 3
+    # Los pesos de comic-text-detector contienen números desnormalizados: en CPU x86 cada operación con ellos es lentísima
+    # (medido en un i7-13620H con ONNX Runtime 1.31: 140 s por inferencia frente a 1,9 s tratándolos como cero). Redondearlos
+    # a cero no cambia el resultado de forma apreciable (valores < 1e-38; comprobado con páginas reales, ver
+    # docs/EVALUACION-CORPUS-USM.md). No afecta a CUDA/DirectML.
+    opts.add_session_config_entry("session.set_denormal_as_zero", "1")
+    return opts
+
+
+def create_session(model_path: Path, device: Device = "auto", threads: int = 0) -> ort.InferenceSession:
+    opts = _base_options()
     if threads:
         opts.intra_op_num_threads = threads
     chain = _provider_chain(device)
@@ -54,9 +64,7 @@ def create_session(model_path: Path, device: Device = "auto", threads: int = 0) 
             if len(chain) == 1:
                 raise
             log.warning("Fallo al crear sesión con GPU para %s (%s). Se usa CPU.", model_path.name, exc)
-            cpu_opts = ort.SessionOptions()
-            cpu_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            cpu_opts.log_severity_level = 3
+            cpu_opts = _base_options()
             sess = ort.InferenceSession(str(model_path), sess_options=cpu_opts, providers=["CPUExecutionProvider"])
     log.info("Sesión ONNX %s con %s", model_path.name, sess.get_providers()[0])
     return sess

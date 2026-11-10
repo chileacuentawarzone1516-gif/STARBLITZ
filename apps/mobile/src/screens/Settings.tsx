@@ -102,6 +102,8 @@ export function SettingsScreen() {
           <Segmented label="Reconstrucción" value={pr.inpaint} onChange={(v) => update({ processing: { inpaint: v } }, true)}
             options={[{ id: 'auto', label: 'Auto' }, { id: 'fast', label: 'Rápida' }, { id: 'lama', label: 'LaMa' }]} /></div>
         <p className="small muted">LaMa rehace el fondo con más fidelidad pero necesita su modelo (208 MB), más memoria y más batería. «Rápida» basta para globos blancos y tramas simples.</p>
+        <Toggle id="s-det" checked={pr.detector === 'manga-det'} onChange={(v) => update({ processing: { detector: v ? 'manga-det' : 'default' } }, true)}
+          label="Detector ligero (experimental)" hint="PP-OCRv6 Manga (1,8 MB, en Modelos → Visión). Mucho más rápido, pero aún sin validar con manga y manhwa reales: puede dejar sin detectar texto pequeño u onomatopeyas. Si no está instalado, el análisis te avisará de que falta." />
         <Toggle id="s-vis" checked={llm.use_vision} onChange={(v) => update({ llm: { use_vision: v } })} label="Usar la imagen al traducir" hint="Solo con un modelo que entienda imágenes; aumenta memoria y tiempo." />
         <label className="field"><span className="label">Descargar el modelo tras {llm.idle_unload_minutes} min sin usarlo</span>
           <input type="range" min={1} max={30} step={1} value={llm.idle_unload_minutes} aria-label="Minutos hasta liberar el modelo" onChange={(e) => setSettings({ ...settings, llm: { ...llm, idle_unload_minutes: Number(e.target.value) } })} onPointerUp={() => update({ llm: { idle_unload_minutes: llm.idle_unload_minutes } })} onKeyUp={() => update({ llm: { idle_unload_minutes: llm.idle_unload_minutes } })} /></label>

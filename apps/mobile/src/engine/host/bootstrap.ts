@@ -91,7 +91,7 @@ export async function createDeviceEngine(opts: DeviceEngineOptions = {}): Promis
     );
   } else {
     // Navegador de desarrollo: los modelos se leen del OPFS y la visión corre en la página.
-    const assets = new DeviceVisionAssets(visionModels, async () => new Uint8Array(await (await fetch(ppocrUrl)).arrayBuffer()), async () => (await flags()).manga);
+    const assets = new DeviceVisionAssets(visionModels, async () => new Uint8Array(await (await fetch(ppocrUrl)).arrayBuffer()), async () => (await flags()).manga, async () => (await flags()).detectorKind ?? 'default');
     vision = new VisionService(assets, { inpaintMode: () => 'fast' });
   }
 

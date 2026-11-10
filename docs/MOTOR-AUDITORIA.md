@@ -16,7 +16,7 @@ de lo **hipotético** (sin medir).
 | 5 | Calidad de traducción insuficiente | Depende del modelo y del contexto; sin medir con un conjunto de referencia | ⏳ Protocolo en [MODELOS-INVESTIGACION](MODELOS-INVESTIGACION.md); sin ganador declarado |
 | 6 | No hay traducción automática de todo | La función existía («Traducir todo el proyecto al terminar») pero la casilla estaba **desmarcada por defecto** | ✅ Ahora viene marcada por defecto |
 | 7 | No se conserva el estilo visual | Hoy se infiere solo color claro/oscuro y contorno (`makeRegion`), con tipografías por rol; no cursiva, sombra ni grosor reales | ⏳ Fase 6 pendiente |
-| 8 | No hay actualizador | No existe | ⏳ Diseño en [DISENO-FASES-5-7](DISENO-FASES-5-7.md) (el repositorio es privado: hay decisiones tuyas pendientes) |
+| 8 | No hay actualizador | No existe | ⏳ Diseño en [DISENO-FASES-5-7](DISENO-FASES-5-7.md) (el repositorio es público desde 2026-11-09; hay decisiones tuyas pendientes) |
 
 ## Cómo funciona hoy el pipeline (comprobado leyendo el código)
 

@@ -19,6 +19,7 @@ import { directionFor } from '../vision/langid';
 import type { ProjectStore } from '../store/projects';
 import { ContextualTranslator, isRefusal, mergeMemory, type PageTranslator } from '../translate/contextual';
 import { PlainTranslator, mtFamily } from '../translate/plain';
+import { BLOCKED_MODEL_MESSAGE, isBlockedModel } from '@starblitz/shared';
 import { createClient, type ClientConfig, type LLMClient } from '../translate/llm';
 import type { LlmRuntime } from '../translate/runtime';
 import type { AnalysisStats, DeviceGuard, DeviceProvider, DeviceSample, ModelLibrary, VisionPort } from './ports';
@@ -211,10 +212,12 @@ export class Processor {
     const cfg: ClientConfig = { provider: s.llm.provider, base_url: s.llm.base_url, api_key: s.llm.api_key, temperature: s.llm.temperature, timeout_s: s.llm.timeout_s, use_vision: s.llm.use_vision };
     const client = (this.d.clientFactory ?? createClient)(cfg, this.d.runtime);
     const salt = JSON.stringify([s.llm.provider, s.llm.temperature, s.llm.use_vision, chosen]);
-    // Los modelos de traducción dedicados (PLaMo 3 Translate, Hy-MT2…) usan el formato en texto plano: no entienden el esquema JSON
-    // de metadatos y es ~10× menos texto que generar (ver docs/ARQUITECTURA-TRADUCCION.md). El resto sigue con el traductor contextual.
+    // Los modelos de traducción dedicados (Hy-MT2) usan el formato en texto plano: no entienden el esquema JSON de metadatos y es
+    // ~10× menos texto que generar (ver docs/ARQUITECTURA-TRADUCCION.md). El resto sigue con el traductor contextual.
     const info = (await this.d.library.installed()).find((m) => m.id === model);
-    const family = mtFamily([model, info?.repo ?? '', ...(info?.files ?? [])].join(' '));
+    const identity = [model, info?.repo ?? '', ...(info?.files ?? [])].join(' ');
+    if (isBlockedModel(identity)) throw new LLMUnavailableError(BLOCKED_MODEL_MESSAGE);
+    const family = mtFamily(identity);
     if (family !== 'generic') {
       return new PlainTranslator(client, model, family, { review_threshold: s.translation.review_threshold, dictionary: s.translation.dictionary, target_variant: s.translation.target_variant },
         { cache: opts.cache ? this.d.caches?.translation : undefined, salt: JSON.stringify([salt, family]) });

@@ -1,5 +1,5 @@
 /**
- * Traducción «en texto plano» por lotes de página, para modelos de traducción dedicados (PLaMo 3 Translate, Hy-MT2…).
+ * Traducción «en texto plano» por lotes de página, para modelos de traducción dedicados (Hy-MT2) y, si se elige, los genéricos.
  *
  * Por qué existe (medido, ver docs/ARQUITECTURA-TRADUCCION.md): el traductor contextual pide al modelo un JSON con muchos campos por
  * texto (hablante, emoción, confianza, notas…), un resumen de página y términos nuevos, tras un prompt de ~1 000 tokens. En una
@@ -20,11 +20,10 @@ import { hashText, type DocCache } from '../pipeline/cache';
 import { REVIEW_FLAGS, clean, effectiveGlossary, isRefusal, type PageTranslation, type PageTranslator, type TranslateOptions, type TranslatorOptions } from './contextual';
 import type { ChatMessage, LLMClient } from './llm';
 
-export type MtFamily = 'plamo' | 'hymt' | 'generic';
+export type MtFamily = 'hymt' | 'generic';
 
 /** Familia de modelo a partir de su identificador, repositorio o archivo. */
 export function mtFamily(text: string): MtFamily {
-  if (/plamo[-_ ]?3[-_ ]?translate/i.test(text)) return 'plamo';
   if (/hy[-_ ]?mt/i.test(text)) return 'hymt';
   return 'generic';
 }
@@ -34,8 +33,6 @@ export const isDedicatedMt = (text: string): boolean => mtFamily(text) !== 'gene
 
 const EN_NAMES: Record<string, string> = { ja: 'Japanese', ko: 'Korean', zh: 'Chinese', en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian', pt: 'Portuguese', ru: 'Russian' };
 const ES_NAMES: Record<string, string> = { ja: 'japonés', ko: 'coreano', zh: 'chino', en: 'inglés', es: 'español', fr: 'francés', de: 'alemán', it: 'italiano', pt: 'portugués', ru: 'ruso' };
-/** Idiomas de origen que PLaMo acepta como `source_lang` (si no está, se deja que lo detecte). */
-const PLAMO_SOURCES = new Set(['ja', 'ko', 'zh', 'en', 'fr', 'de', 'it', 'pt', 'ru']);
 
 const GENERIC_SYSTEM = 'Eres un traductor profesional de manga, manhwa y cómics al español. Traduce de forma FIEL y COMPLETA: sin omitir, sin añadir, '
   + 'sin resumir, sin explicar y sin suavizar. Conserva el tono, los insultos, la vulgaridad, el contenido sexual y la violencia tal cual '
@@ -64,15 +61,6 @@ const maxTokensFor = (texts: string[]) => Math.min(2048, 96 + texts.reduce((n, t
 /** Construye la petición con el formato nativo de cada familia. */
 export function buildPlainRequest(family: MtFamily, i: PlainInput): PlainRequest {
   const maxTokens = maxTokensFor(i.texts);
-  if (family === 'plamo') {
-    const kw: Record<string, unknown> = { target_lang: 'es' };
-    if (PLAMO_SOURCES.has(i.lang)) kw.source_lang = i.lang;
-    if (i.glossary.length) kw.glossary = i.glossary.map((g) => ({ source: g.source, target: g.target }));
-    const messages: ChatMessage[] = [];
-    for (const h of i.history) messages.push({ role: 'user', content: h.source }, { role: 'assistant', content: h.target });
-    messages.push({ role: 'user', content: i.texts.join('\n') });
-    return { messages, maxTokens, extra: { chat_template_kwargs: kw, stop: ['<|plamo:tag|>', '<|plamo:bos|>'] } };
-  }
   if (family === 'hymt') {
     const lang = EN_NAMES[i.lang] ?? i.lang;
     const terms = i.glossary.length ? 'Reference the following translations:\n' + i.glossary.map((g) => `${g.source} translates to ${g.target}`).join('\n') + '\n' : '';
@@ -95,11 +83,7 @@ export function buildPlainRequest(family: MtFamily, i: PlainInput): PlainRequest
 export function parsePlain(family: MtFamily, content: string, n: number, batch: boolean): string[] {
   const text = (content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
   if (!batch || n === 1) return [text];
-  if (family === 'plamo') {
-    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-    // Si el número de líneas no coincide no se sabe qué línea es de qué texto: no se adivina.
-    return lines.length === n ? lines : Array(n).fill('');
-  }
+  void family; // todas las familias admitidas usan la numeración [n]
   const got = new Map<number, string>();
   for (const line of text.split('\n')) {
     const m = /^\s*\[?(\d+)[\]\.\):]\s*(.*)$/.exec(line);

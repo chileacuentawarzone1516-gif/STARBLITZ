@@ -5,6 +5,7 @@
 import { configureOrt, createSession, type OrtSession } from '../../src/engine/runtime/ort';
 import { decodeToBgr, encodeMat, loadCv, type Mat } from '../../src/engine/runtime/cv';
 import { TextDetector } from '../../src/engine/vision/detector';
+import { MangaLineDetector } from '../../src/engine/vision/mangaDet';
 import { detectPanels, readingOrder } from '../../src/engine/vision/layout';
 import { findBubble, textRingStats } from '../../src/engine/vision/bubbles';
 import { PaddleOcrEngine } from '../../src/engine/vision/ocr/ppocr';
@@ -14,6 +15,7 @@ import { VisionService } from '../../src/engine/vision/service';
 import { splitLines } from '../../src/engine/vision/regions';
 import { decodeToGray } from '../../src/engine/runtime/cv';
 import { zipSync } from 'fflate';
+import { layoutRegion, loadLetteringFonts, regionFits, renderPageBlob, type Page } from '@starblitz/shared';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { BrowserImageCodec } from '../../src/engine/importers/codec';
 import { hamming } from '../../src/engine/importers/formats';
@@ -27,6 +29,7 @@ let detector: TextDetector | null = null;
 let ocr: PaddleOcrEngine | null = null;
 let session: OrtSession | null = null;
 let service: VisionService | null = null;
+let mangaDet: MangaLineDetector | null = null;
 
 async function blobToDataUrl(blob: Blob): Promise<string> {
   const buf = new Uint8Array(await blob.arrayBuffer());
@@ -157,6 +160,40 @@ const api = {
       reread: reread && { id_kept: reread.id === first!.id, text: reread.source_text, kind: reread.kind, bbox: reread.bbox },
       annotated: annotatedInfo, splits, t_analyze: tAnalyze, clean_png: await blobToDataUrl(clean), mask_png: await blobToDataUrl(analysis.mask),
     };
+  },
+
+  /** Rotulación y exportación con el renderizador COMPARTIDO de las apps (el mismo de «Exportar»): página traducida en PNG. */
+  async exportPage(pageJsonUrl: string, cleanUrl: string) {
+    await loadLetteringFonts();
+    const page = await (await fetch(pageJsonUrl)).json() as Page;
+    const bitmap = await createImageBitmap(await (await fetch(cleanUrl)).blob());
+    const t = performance.now();
+    const blob = await renderPageBlob(page, bitmap, 'png');
+    const ms = Math.round(performance.now() - t);
+    bitmap.close();
+    const drawn = page.regions.filter((r) => r.render && r.translation.trim() && !r.flags.includes('original_kept')); // misma regla que renderPage
+    const notFit = drawn.filter((r) => !regionFits(r, page)).map((r) => ({ id: r.id, bbox: r.bbox, text: r.translation, size: layoutRegion(r, page).fontSize }));
+    return { png: await blobToDataUrl(blob), ms, drawn: drawn.length, not_fit: notFit };
+  },
+
+  /** Detector EXPERIMENTAL (PP-OCRv6 Manga) sobre una imagen: líneas, bloques y máscara, para compararlo con el motor Python. */
+  async mangaDetect(imageUrl: string, modelUrl: string, wasmBase?: string) {
+    const cv = await loadCv();
+    if (!mangaDet) {
+      configureOrt({ wasmBase });
+      mangaDet = await MangaLineDetector.create(await createSession(await fetchBytes(modelUrl)));
+    }
+    const img: Mat = await decodeToBgr(cv, await (await fetch(imageUrl)).blob());
+    const t = performance.now();
+    const { blocks, mask, stats } = await mangaDet.detect(img);
+    const ms = Math.round(performance.now() - t);
+    let maskPixels = 0;
+    for (let i = 0; i < mask.data.length; i++) if (mask.data[i]) maskPixels++;
+    const out = { width: img.cols, height: img.rows, ms, infer_ms: Math.round(stats.infer_ms), tiles: stats.tiles, mask_pixels: maskPixels,
+      blocks: blocks.map((b) => ({ bbox: b.bbox, lines: b.lines, vertical: b.vertical, confidence: b.confidence, line_size: b.lineSize })),
+      mask_png: await blobToDataUrl(await encodeMat(cv, mask)), isolated: crossOriginIsolated };
+    img.delete(); mask.delete();
+    return out;
   },
 
   /** Ejecuta visión completa sobre una imagen y devuelve lo mismo que `tools/golden_vision.py`. */
