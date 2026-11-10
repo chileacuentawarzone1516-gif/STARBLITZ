@@ -9,6 +9,7 @@
  */
 import { loadCv, median, scoped, type Cv, type Mat } from '../runtime/cv';
 import { ort, type OrtSession } from '../runtime/ort';
+import { GROUP_MIN_MARGIN, findBubble, findBubbleWide, pointInPolygon } from './bubbles';
 import { clusterLines, dedupeAcross, orderPoints, tileSpans } from './detector';
 import { blockArea, lineGeometry, polyBBox, type Box, type DetectedBlock, type Poly } from './types';
 
@@ -74,7 +75,7 @@ export class MangaLineDetector {
       scores = keep.map((i) => scores[i]);
     }
     const mask = lineMask(cv, img, lines);
-    return { blocks: groupLines(lines, scores, w, h), mask, stats: { infer_ms: this.inferMs, tiles: spans.length } };
+    return { blocks: mergeByBubble(cv, img, mask, groupLines(lines, scores, w, h), w, h), mask, stats: { infer_ms: this.inferMs, tiles: spans.length } };
   }
 
   private async detectLines(img: Mat): Promise<{ lines: Poly[]; scores: number[] }> {
@@ -159,21 +160,68 @@ function meanInside(cv: Cv, contour: Mat, rect: { x: number; y: number; width: n
   });
 }
 
+/** Bloque a partir de sus líneas: rectángulo, orientación y cuerpo de letra. */
+export function makeBlock(group: Poly[], confidence: number, w: number, h: number): DetectedBlock {
+  const geoms = group.map(lineGeometry);
+  const [x1, y1, x2, y2] = polyBBox(group.flat() as [number, number][]);
+  const elongated = geoms.filter((g) => g.length > g.thickness * 1.5);
+  const vertical = elongated.length ? elongated.filter((g) => g.vertical).length * 2 > elongated.length : (y2 - y1) > (x2 - x1) * 1.2;
+  return { bbox: [Math.max(0, x1), Math.max(0, y1), Math.min(w, x2), Math.min(h, y2)] as Box, lines: group, vertical,
+    confidence, langHint: 'unknown', lineSize: median(geoms.map((g) => g.thickness)) };
+}
+
 /** Bloques a partir de líneas (el modelo no detecta bloques ni globos). */
 export function groupLines(lines: Poly[], scores: number[], w: number, h: number): DetectedBlock[] {
   const scoreOf = new Map<Poly, number>(lines.map((p, i) => [p, scores[i]]));
   const blocks: DetectedBlock[] = [];
   for (const group of clusterLines(lines)) {
-    const geoms = group.map(lineGeometry);
-    const [x1, y1, x2, y2] = polyBBox(group.flat() as [number, number][]);
-    const elongated = geoms.filter((g) => g.length > g.thickness * 1.5);
-    const vertical = elongated.length ? elongated.filter((g) => g.vertical).length * 2 > elongated.length : (y2 - y1) > (x2 - x1) * 1.2;
-    const conf = group.reduce((s, p) => s + (scoreOf.get(p) ?? 0), 0) / group.length;
-    const b: DetectedBlock = { bbox: [Math.max(0, x1), Math.max(0, y1), Math.min(w, x2), Math.min(h, y2)] as Box, lines: group, vertical,
-      confidence: conf, langHint: 'unknown', lineSize: median(geoms.map((g) => g.thickness)) };
+    const b = makeBlock(group, group.reduce((s, p) => s + (scoreOf.get(p) ?? 0), 0) / group.length, w, h);
     if (blockArea(b) >= 64) blocks.push(b);
   }
   return blocks;
+}
+
+// Ruido: una línea, fuera de globo, mucho más fina que el texto de la página y corta (igual que en Python).
+const NOISE_THICKNESS = 0.6;
+const NOISE_MAX_ELONGATION = 4.0;
+
+/** Une los bloques que caen dentro del MISMO globo (port de `merge_by_bubble`). */
+export function mergeByBubble(cv: Cv, img: Mat, mask: Mat, blocks: DetectedBlock[], w: number, h: number): DetectedBlock[] {
+  const n = blocks.length;
+  if (n < 2) return blocks;
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  const centers = blocks.map((b) => [(b.bbox[0] + b.bbox[2]) / 2, (b.bbox[1] + b.bbox[3]) / 2] as [number, number]);
+  const hasBubble = new Array<boolean>(n).fill(false);
+  // Igual que en Python: búsqueda normal primero, ampliada solo si falla, y nada para un bloque que ya quedó dentro de otro globo.
+  blocks.forEach((b, i) => {
+    if (hasBubble[i]) return;
+    const bubble = findBubble(cv, img, mask, b) ?? findBubbleWide(cv, img, mask, b, GROUP_MIN_MARGIN);
+    if (!bubble) return;
+    hasBubble[i] = true;
+    for (let j = 0; j < n; j++) {
+      if (j !== i && b.vertical === blocks[j].vertical && pointInPolygon(centers[j][0], centers[j][1], bubble.polygon)) {
+        parent[find(j)] = find(i);
+        hasBubble[j] = true;
+      }
+    }
+  });
+  const groups = new Map<number, number[]>();
+  for (let i = 0; i < n; i++) { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r)!.push(i); }
+  const medianLine = median(blocks.map((b) => b.lineSize));
+  return [...groups.values()].sort((a, b) => a[0] - b[0]).flatMap((members) => {
+    if (members.length === 1) {
+      const b = blocks[members[0]];
+      const longSide = Math.max(b.bbox[2] - b.bbox[0], b.bbox[3] - b.bbox[1]);
+      const noise = b.lines.length === 1 && !hasBubble[members[0]] && b.lineSize < NOISE_THICKNESS * medianLine
+        && longSide < NOISE_MAX_ELONGATION * b.lineSize;
+      return noise ? [] : [b];
+    }
+    const lines = members.flatMap((k) => blocks[k].lines);
+    const weights = members.map((k) => blocks[k].lines.length);
+    const confidence = members.reduce((s, k, i) => s + blocks[k].confidence * weights[i], 0) / weights.reduce((s, x) => s + x, 0);
+    return [makeBlock(lines, confidence, w, h)];
+  });
 }
 
 /** Máscara de trazos de texto dentro de cada línea (Otsu local; la clase minoritaria son los trazos). */

@@ -15,7 +15,7 @@ import { VisionService } from '../../src/engine/vision/service';
 import { splitLines } from '../../src/engine/vision/regions';
 import { decodeToGray } from '../../src/engine/runtime/cv';
 import { zipSync } from 'fflate';
-import { layoutRegion, loadLetteringFonts, regionFits, renderPageBlob, type Page } from '@starblitz/shared';
+import { layoutRegion, loadLetteringFonts, regionFits, renderPage, type Page } from '@starblitz/shared';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { BrowserImageCodec } from '../../src/engine/importers/codec';
 import { hamming } from '../../src/engine/importers/formats';
@@ -163,17 +163,23 @@ const api = {
   },
 
   /** Rotulación y exportación con el renderizador COMPARTIDO de las apps (el mismo de «Exportar»): página traducida en PNG. */
-  async exportPage(pageJsonUrl: string, cleanUrl: string) {
+  async exportPage(pageJsonUrl: string, cleanUrl: string, originalUrl?: string) {
     await loadLetteringFonts();
     const page = await (await fetch(pageJsonUrl)).json() as Page;
     const bitmap = await createImageBitmap(await (await fetch(cleanUrl)).blob());
+    // Con el original, lo que no cabe se exporta con el texto original restaurado (como hacen ahora las apps al exportar).
+    const original = originalUrl ? await createImageBitmap(await (await fetch(originalUrl)).blob()) : undefined;
     const t = performance.now();
-    const blob = await renderPageBlob(page, bitmap, 'png');
+    const canvas = new OffscreenCanvas(page.width, page.height);
+    const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingQuality = 'high';
+    const stats = renderPage(ctx, bitmap, page, original ? { original } : {});
+    const blob = await canvas.convertToBlob({ type: 'image/png' });
     const ms = Math.round(performance.now() - t);
-    bitmap.close();
-    const drawn = page.regions.filter((r) => r.render && r.translation.trim() && !r.flags.includes('original_kept')); // misma regla que renderPage
-    const notFit = drawn.filter((r) => !regionFits(r, page)).map((r) => ({ id: r.id, bbox: r.bbox, text: r.translation, size: layoutRegion(r, page).fontSize }));
-    return { png: await blobToDataUrl(blob), ms, drawn: drawn.length, not_fit: notFit };
+    bitmap.close(); original?.close();
+    const candidates = page.regions.filter((r) => r.render && r.translation.trim() && !r.flags.includes('original_kept')); // misma regla que renderPage
+    const notFit = candidates.filter((r) => !regionFits(r, page)).map((r) => ({ id: r.id, bbox: r.bbox, text: r.translation, size: layoutRegion(r, page).fontSize }));
+    return { png: await blobToDataUrl(blob), ms, drawn: stats.drawn, kept_original: stats.keptOriginal.length, not_fit: notFit };
   },
 
   /** Detector EXPERIMENTAL (PP-OCRv6 Manga) sobre una imagen: líneas, bloques y máscara, para compararlo con el motor Python. */
@@ -191,7 +197,10 @@ const api = {
     for (let i = 0; i < mask.data.length; i++) if (mask.data[i]) maskPixels++;
     const out = { width: img.cols, height: img.rows, ms, infer_ms: Math.round(stats.infer_ms), tiles: stats.tiles, mask_pixels: maskPixels,
       blocks: blocks.map((b) => ({ bbox: b.bbox, lines: b.lines, vertical: b.vertical, confidence: b.confidence, line_size: b.lineSize })),
-      mask_png: await blobToDataUrl(await encodeMat(cv, mask)), isolated: crossOriginIsolated };
+      mask_png: await blobToDataUrl(await encodeMat(cv, mask)), isolated: crossOriginIsolated,
+      // Memoria de WebAssembly de OpenCV.js (crece si hay matrices sin liberar) y del montón de JavaScript.
+      cv_heap_mb: Math.round(((cv as unknown as { HEAP8?: Int8Array }).HEAP8?.buffer.byteLength ?? 0) / 2 ** 20),
+      js_heap_mb: Math.round(((performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0) / 2 ** 20) };
     img.delete(); mask.delete();
     return out;
   },

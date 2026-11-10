@@ -38,9 +38,11 @@ const rows = [];
 for (const id of ids) {
   // Sin página limpia (página sin texto: no hay nada que borrar) la app exporta el original, igual que aquí.
   const baseImg = existsSync(join(imgDir, `${id}-clean.png`)) ? `${id}-clean.png` : `${id}-original.png`;
-  const r = await page.evaluate(([j, c]) => window.SBT.exportPage(j, c), [`${base}/img/${id}-page.json`, `${base}/img/${baseImg}`]);
+  // `--sin-original` reproduce la exportación antigua (traducción desbordada en vez de restaurar el original).
+  const orig = process.argv.includes('--sin-original') ? undefined : `${base}/img/${id}-original.png`;
+  const r = await page.evaluate(([j, c, o]) => window.SBT.exportPage(j, c, o), [`${base}/img/${id}-page.json`, `${base}/img/${baseImg}`, orig]);
   writeFileSync(join(out, `${id}-traducida.png`), Buffer.from(r.png.split(',')[1], 'base64'));
-  rows.push({ page: id, base: baseImg, ms: r.ms, drawn: r.drawn, not_fit: r.not_fit });
+  rows.push({ page: id, base: baseImg, ms: r.ms, drawn: r.drawn, kept_original: r.kept_original, not_fit: r.not_fit });
   console.log(JSON.stringify({ page: id, ms: r.ms, drawn: r.drawn, not_fit: r.not_fit.length }));
 }
 writeFileSync(join(out, 'export.json'), JSON.stringify({ errors, pages: rows }, null, 1));

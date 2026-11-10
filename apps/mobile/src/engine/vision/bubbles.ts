@@ -48,16 +48,86 @@ export function textRingStats(cv: Cv, img: Mat, textMask: Mat, bbox: Box): { med
   });
 }
 
-export function findBubble(cv: Cv, img: Mat, textMask: Mat, block: DetectedBlock): BubbleInfo | null {
+const PAPER_MIN_PIXELS = 30;
+const PAPER_MAX_SPREAD = 22.0;
+
+/**
+ * Color del «papel» que se ve ENTRE las letras, dentro del propio bloque (port de `paper_stats`). El anillo exterior falla con
+ * los globos ajustados al texto: cruza el contorno y mide el dibujo de alrededor (el «globo» acababa siendo la silueta del texto).
+ */
+export function paperStats(cv: Cv, img: Mat, textMask: Mat, bbox: Box): { median: number[]; spread: number } | null {
+  const [x1, y1, x2, y2] = bbox;
+  const rw = x2 - x1, rh = y2 - y1;
+  if (rw <= 0 || rh <= 0) return null;
+  return scoped((s) => {
+    const rect = new cv.Rect(x1, y1, rw, rh);
+    const sub = s.add(textMask.roi(rect));
+    const dil = s.add(new cv.Mat());
+    cv.dilate(sub, dil, s.add(cv.Mat.ones(3, 3, cv.CV_8UC1)), new cv.Point(-1, -1), 1, cv.BORDER_CONSTANT, cv.morphologyDefaultBorderValue());
+    const region = cropClone(s, img, rect);
+    const dd = dil.data;
+    const idx: number[] = [];
+    for (let i = 0; i < rw * rh; i++) if (dd[i] === 0) idx.push(i);
+    if (idx.length < PAPER_MIN_PIXELS) return null;
+    const data = region.data;
+    const med = channelMedians(data, 3, idx);
+    let sum = 0;
+    for (const i of idx) {
+      const b = i * 3;
+      sum += Math.abs(data[b] - med[0]) + Math.abs(data[b + 1] - med[1]) + Math.abs(data[b + 2] - med[2]);
+    }
+    return { median: med, spread: sum / (idx.length * 3) };
+  });
+}
+
+/** Fondo para buscar el globo: el papel entre letras si es liso; si no, el anillo alrededor del texto. */
+export function bubbleBackground(cv: Cv, img: Mat, textMask: Mat, bbox: Box): { median: number[]; spread: number } {
+  const paper = paperStats(cv, img, textMask, bbox);
+  return paper && paper.spread < PAPER_MAX_SPREAD ? paper : textRingStats(cv, img, textMask, bbox);
+}
+
+// Búsqueda AMPLIADA (igual que en Python): para agrupar líneas sueltas y, en el pipeline, como segundo intento EXCLUSIVO.
+export const WIDE_WINDOW = 4.0;
+export const WIDE_MAX_AREA = 40.0;
+export const WIDE_MIN_MARGIN = 2.5;
+/** Al agrupar líneas del detector experimental basta 1× (misma agrupación en el corpus y un 38 % más rápido). */
+export const GROUP_MIN_MARGIN = 1.0;
+
+/** Regla par-impar (la misma cuenta que en Python). */
+export function pointInPolygon(x: number, y: number, polygon: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0; i < polygon.length; i++) {
+    const [x1, y1] = polygon[i];
+    const [x2, y2] = polygon[(i + 1) % polygon.length];
+    if ((y1 > y) !== (y2 > y) && x < x1 + ((y - y1) * (x2 - x1)) / (y2 - y1)) inside = !inside;
+  }
+  return inside;
+}
+
+export function findBubbleWide(cv: Cv, img: Mat, textMask: Mat, block: DetectedBlock, margin = WIDE_MIN_MARGIN): BubbleInfo | null {
+  const [x1, y1, x2, y2] = block.bbox;
+  return findBubble(cv, img, textMask, block, WIDE_WINDOW, WIDE_MAX_AREA, Math.trunc(margin * Math.max(x2 - x1, y2 - y1)));
+}
+
+/** Globo del bloque: búsqueda normal y, si falla, la ampliada siempre que no contenga el centro de otro texto. */
+export function findBubbleExclusive(cv: Cv, img: Mat, textMask: Mat, block: DetectedBlock, others: [number, number][]): BubbleInfo | null {
+  const bubble = findBubble(cv, img, textMask, block);
+  if (bubble) return bubble;
+  const wide = findBubbleWide(cv, img, textMask, block);
+  return wide && !others.some(([cx, cy]) => pointInPolygon(cx, cy, wide.polygon)) ? wide : null;
+}
+
+/** Globo que contiene el bloque. `window`, `maxAreaRatio` y `minMargin` solo se amplían en la búsqueda ampliada. */
+export function findBubble(cv: Cv, img: Mat, textMask: Mat, block: DetectedBlock, window = 1.6, maxAreaRatio = 6.0, minMargin = 0): BubbleInfo | null {
   const h = img.rows, w = img.cols;
   const [x1, y1, x2, y2] = block.bbox;
   const bw = x2 - x1, bh = y2 - y1;
   if (bw < 4 || bh < 4) return null;
-  const { median: bg, spread } = textRingStats(cv, img, textMask, block.bbox);
+  const { median: bg, spread } = bubbleBackground(cv, img, textMask, block.bbox);
   const uniform = spread < 12.0;
 
   // Ventana de búsqueda acotada: un globo rara vez supera ~3x el bloque de texto.
-  const mx = Math.trunc(bw * 1.6) + 20, my = Math.trunc(bh * 1.6) + 20;
+  const mx = Math.max(Math.trunc(bw * window) + 20, minMargin), my = Math.max(Math.trunc(bh * window) + 20, minMargin);
   const wx1 = Math.max(0, x1 - mx), wy1 = Math.max(0, y1 - my), wx2 = Math.min(w, x2 + mx), wy2 = Math.min(h, y2 + my);
   const ww = wx2 - wx1, wh = wy2 - wy1;
   const tol = uniform ? 38 : 26;
@@ -99,7 +169,7 @@ export function findBubble(cv: Cv, img: Mat, textMask: Mat, block: DetectedBlock
     // Si la componente llega al borde de la ventana (salvo el borde de la página) se ha «derramado» por la viñeta.
     const hits: [boolean, boolean][] = [[cx <= 0, wx1 === 0], [cy <= 0, wy1 === 0], [cx + cw >= ww, wx2 === w], [cy + ch >= wh, wy2 === h]];
     for (const [edgeHit, pageEdge] of hits) if (edgeHit && !pageEdge) return null;
-    if (area > 6 * bw * bh) return null;
+    if (area > maxAreaRatio * bw * bh) return null;
 
     const comp = s.add(new cv.Mat(wh, ww, cv.CV_8UC1));
     const cd = comp.data;

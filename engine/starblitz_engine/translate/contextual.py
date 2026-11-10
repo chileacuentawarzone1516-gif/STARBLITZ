@@ -19,15 +19,16 @@ from dataclasses import dataclass, field
 
 from ..core.settings import TranslationSettings
 from ..projects.schema import Character, GlossaryEntry, Page, Project, Region
+from . import quality
 from .llm import ChatMessage, LLMClient
 from .prompts import (
-    DEFAULT_PROFILE, HONORIFICS, KIND_LABELS, LANG_NAMES, PROFILES, REVIEW_SCHEMA, REVIEWER_SYSTEM, SUMMARY_NOTE,
-    TRANSLATION_SCHEMA, TRANSLATOR_SYSTEM, VARIANTS,
+    DEFAULT_PROFILE, ECHO_NOTE, HONORIFICS, KIND_LABELS, LANG_NAMES, PROFILES, REPAIR_HEADER, REVIEW_SCHEMA, REVIEWER_SYSTEM,
+    SUMMARY_NOTE, TRANSLATION_SCHEMA, TRANSLATOR_SYSTEM, VARIANTS,
 )
 
 log = logging.getLogger(__name__)
 
-REVIEW_FLAGS = {"ambiguous", "ocr_suspect", "wordplay", "refused"}
+REVIEW_FLAGS = {"ambiguous", "ocr_suspect", "wordplay", "refused", "variant", "name"}
 MAX_AUTO_GLOSSARY = 250
 _QUOTES = re.compile(r"^[「『“\"']+|[」』”\"']+$")
 _REFUSAL = re.compile(
@@ -47,6 +48,7 @@ class PageTranslation:
     new_terms: list[GlossaryEntry] = field(default_factory=list)
     characters: list[Character] = field(default_factory=list)
     reviewed: int = 0
+    repaired: int = 0  # textos que necesitaron la llamada de reparación (desalineados, inventados, «vosotros», nombres)
 
 
 class ContextualTranslator:
@@ -84,7 +86,7 @@ class ContextualTranslator:
         if image_jpeg:
             user += ("\nSe adjunta la imagen de la página: cada texto está marcado con su número en un círculo. "
                      "Úsala para identificar quién habla, a quién y con qué emoción.\n")
-        user += f"\nDevuelve un elemento en «items» por cada número traducible. En «page_summary»: {SUMMARY_NOTE}"
+        user += f"\nDevuelve un elemento en «items» por cada número traducible. {ECHO_NOTE} En «page_summary»: {SUMMARY_NOTE}"
 
         result = self.client.chat_json(
             [ChatMessage("system", system), ChatMessage("user", user, images=[image_jpeg] if image_jpeg else [])],
@@ -97,6 +99,10 @@ class ContextualTranslator:
             item = by_n.get(numbering[r.id])
             if item:
                 drafts[r.id] = item
+
+        names = quality.known_names(project.characters, effective_glossary(project, self.s.dictionary))
+        repaired = self._repair(project, page, targets, numbering, drafts, names, system,
+                                self._context_block(project, page, prev_page, None, story, compact=True), cancel)
 
         reviewed = 0
         if self.s.quality == "max" and drafts:
@@ -114,6 +120,17 @@ class ContextualTranslator:
                 updated.append(region)
                 continue
             text = _clean(str(item.get("final") or item["translation"]))
+            issues = quality.check(r.source_text, text, str(item.get("src_start", "")), project.target_variant, names)
+            blocking = [i for i in issues if i in quality.BLOCKING]
+            if blocking:
+                # Ni tras la reparación es la traducción de ESTE texto: no se usa (el original se conserva en el dibujo).
+                region.translation = ""
+                region.flags = sorted(set(region.flags) | {"untranslated", *blocking})
+                region.status = "review"
+                region.note = "La traducción del modelo no correspondía a este texto (desalineada o inventada); tradúcelo a mano."
+                updated.append(region)
+                continue
+            text = quality.match_case(r.source_text, text)
             if _REFUSAL.search(text) and not _REFUSAL.search(r.source_text):
                 # El modelo contestó con una negativa en lugar de traducir: no se guarda como traducción.
                 region.translation = ""
@@ -123,7 +140,7 @@ class ContextualTranslator:
                                "en Modelos o escribe la traducción a mano.")
                 updated.append(region)
                 continue
-            flags = {f for f in item.get("flags", []) if isinstance(f, str)}
+            flags = {f for f in item.get("flags", []) if isinstance(f, str)} | set(issues)
             confidence = _clamp(item.get("confidence", 0.8))
             region.translation = text
             region.speaker = str(item.get("speaker", ""))[:80]
@@ -152,7 +169,52 @@ class ContextualTranslator:
         return PageTranslation(updated=updated, summary=str(result.get("page_summary", ""))[:600],
                                new_terms=[t for t in new_terms if t.source and t.target and t.source.lower() not in own_terms],
                                characters=characters,
-                               reviewed=reviewed)
+                               reviewed=reviewed, repaired=repaired)
+
+    # ------------------------------------------------------------------
+    def _repair(self, project: Project, page: Page, targets: list[Region], numbering: dict[str, int], drafts: dict[str, dict],
+                names: list[tuple[str, str]], system: str, user_context: str, cancel: threading.Event | None) -> int:
+        """Una sola llamada para los textos con problemas (sin traducción, desalineados, inventados, «vosotros», nombres).
+
+        La respuesta nueva solo sustituye a la anterior si ya no tiene problemas que impidan usarla. Devuelve cuántos textos
+        se pidieron de nuevo."""
+        bad: list[tuple[Region, str]] = []
+        for r in targets:
+            d = drafts.get(r.id)
+            if not d or not str(d.get("translation", "")).strip():
+                bad.append((r, quality.MISSING_TEXT))
+                continue
+            text = _clean(str(d["translation"]))
+            issues = quality.check(r.source_text, text, str(d.get("src_start", "")), project.target_variant, names)
+            if issues:
+                bad.append((r, quality.describe(issues, quality.lost_names(r.source_text, text, names))))
+        if not bad:
+            return 0
+        user = user_context + "\n\n" + REPAIR_HEADER.format(page=page.index + 1) + "\n"
+        for r, problem in bad:
+            user += f"[{numbering[r.id]}] ({KIND_LABELS.get(r.kind, r.kind)}, máx. ~{r.max_chars} caracteres) {r.source_text}\n"
+            user += f"  Problema: {problem}\n"
+        user += f"\nDevuelve un elemento en «items» por cada número de esta lista. {ECHO_NOTE} En «page_summary» deja una cadena vacía."
+        try:
+            result = self.client.chat_json([ChatMessage("system", system), ChatMessage("user", user)], TRANSLATION_SCHEMA,
+                                           model=self.model, cancel=cancel)
+        except Exception as exc:  # la reparación es una mejora: si falla, deciden las comprobaciones finales
+            from ..core.errors import CancelledError
+
+            if isinstance(exc, CancelledError):
+                raise
+            log.warning("Fallo en la reparación de la página %s: %s", page.index + 1, exc)
+            return len(bad)
+        by_n = {int(it.get("n", -1)): it for it in result.get("items", []) if isinstance(it, dict)}
+        for r, _problem in bad:
+            it = by_n.get(numbering[r.id])
+            if not it or not str(it.get("translation", "")).strip():
+                continue
+            text = _clean(str(it["translation"]))
+            again = quality.check(r.source_text, text, str(it.get("src_start", "")), project.target_variant, names)
+            if not any(i in quality.BLOCKING for i in again):
+                drafts[r.id] = it
+        return len(bad)
 
     # ------------------------------------------------------------------
     def _review(self, project: Project, page: Page, targets: list[Region], numbering: dict[str, int],
@@ -272,7 +334,10 @@ def estimate_max_chars(layout_box: tuple[int, int, int, int], line_size: float, 
     """Caracteres que caben con un cuerpo de letra legible (≈ el del original)."""
     x1, y1, x2, y2 = layout_box
     w, h = max(1, x2 - x1), max(1, y2 - y1)
-    font = max(line_size * 0.8, page_height * 0.013, 11.0)
+    # Mismo cuerpo mínimo que el maquetador (`sizeBounds`: 0,8 % de la altura de página). Antes se suponía 1,3 %, más grande que el
+    # rotulado original de un cómic occidental: el límite salía ~2,5 veces menor de lo que cabe y «too_long» saltaba en 7 de cada
+    # 10 textos (medido el 2026-11-09).
+    font = max(line_size * 0.8, page_height * 0.008, 11.0)
     fill = 0.62 if in_bubble else 0.8  # los globos elípticos aprovechan menos superficie
     per_line = max(1.0, w * 0.9 / (font * 0.55))
     lines = max(1.0, h * 0.9 / (font * 1.15))

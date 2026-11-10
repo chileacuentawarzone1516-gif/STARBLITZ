@@ -11,6 +11,26 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y 
 Primera versión del código. **No hay ninguna Release publicada**: antes de publicarla deben completarse y documentarse
 las pruebas de [docs/PRUEBAS-HARDWARE.md](docs/PRUEBAS-HARDWARE.md).
 
+### Corregido (fase 2: causas generales encontradas con el capítulo real)
+
+- **Globos ajustados al texto no se reconocían:** el color de fondo se estimaba con un anillo alrededor del texto, que en los globos
+  ajustados (cómic occidental) cae sobre el dibujo; el «globo» resultaba ser la silueta del propio texto. Ahora se usa el papel visible
+  entre las letras (`paper_stats`/`paperStats`) y el anillo solo como respaldo.
+- **Globos grandes con poco texto** (una línea, estilo manga) se descartaban por medir más de 6× el bloque: segundo intento con búsqueda
+  ampliada, aceptado solo si el globo no contiene el texto de otra región.
+- **Traducciones superpuestas:** las cajas de rotulado de globos pegados se pisaban; ahora se cortan por la línea media entre los textos
+  originales, sin encoger nunca por debajo del texto original (`separate_layouts`/`separateLayouts`).
+- **Textos que no cabían:** letra mínima fija (0,8 % de la página) mayor que el rotulado condensado original; ahora puede bajar hasta el
+  75 % del cuerpo original, se prueba la tipografía condensada incluida antes de rendirse y, en globos, el margen se aplica al contorno y no
+  dos veces. Al **exportar**, lo que aun así no cabe se deja con el **texto original restaurado** (nunca desbordado); el editor sigue
+  mostrando el desbordamiento para corregirlo a mano.
+- **`too_long` en 7 de cada 10 textos:** la estimación de caracteres suponía una letra mayor que el mínimo del maquetador; ahora usa el mismo.
+- **Traducción:** cada respuesta del modelo trae el eco de las primeras palabras de su original (`src_start`); se comprueban desalineación,
+  texto inventado, «vosotros» en es-419 y nombres propios perdidos, y los textos con problemas se piden de nuevo en **una** llamada de
+  reparación. Si siguen desalineados o inventados, no se usan (el original se conserva). Mayúsculas iguales que en el original. Instrucciones
+  reforzadas: nombres propios sin traducir, concordancia de género, es-419 sin «vosotros». Igual en móvil y PC (casos de paridad).
+- **Detector experimental:** agrupación de líneas por globo y descarte de ruido (líneas sueltas diminutas fuera de globo).
+
 ### Añadido
 
 - **Detector de texto experimental PP-OCRv6 Manga (PC y móvil), desactivado por defecto:** `processing.detector = "manga-det"`

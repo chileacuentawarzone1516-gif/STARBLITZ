@@ -19,7 +19,7 @@ import { detectPanels, readingOrder } from './layout';
 import { type MangaOcrFiles, MangaOcrEngine } from './ocr/mangaOcr';
 import { PaddleOcrEngine } from './ocr/ppocr';
 import type { OcrEngine } from './ocr/base';
-import { makeRegion, splitLines } from './regions';
+import { makeRegion, separateLayouts, splitLines } from './regions';
 import { blockArea, type Box, type DetectedBlock } from './types';
 
 /** De dónde salen los modelos de visión. */
@@ -170,12 +170,14 @@ export class VisionService implements VisionPort {
       const tLayout = performance.now();
       const medianLine = blocks.length ? median(blocks.map((b) => b.lineSize)) : 0;
       const regions: Region[] = [];
+      const centers = blocks.map((b) => [(b.bbox[0] + b.bbox[2]) / 2, (b.bbox[1] + b.bbox[3]) / 2] as [number, number]);
       for (const [rank, bi] of order.entries()) {
         if (signal?.aborted) throw new CancelledError();
         const block = blocks[bi];
         const ocr = await engine.recognize(img, block);
         const region = makeRegion(cv, {
           img, mask, block, text: ocr.text, confidence: ocr.confidence, engine: ocr.engine, order: rank, medianLine, sfx: input.sfx, pageHeight: input.pageHeight,
+          others: centers.filter((_, k) => k !== bi),
         });
         if (!ocr.text.trim()) {
           // Antes se descartaba en silencio y el texto «desaparecía» del análisis. Ahora queda visible para revisarlo: el original
@@ -186,6 +188,7 @@ export class VisionService implements VisionPort {
         }
         regions.push(region);
       }
+      separateLayouts(regions, input.pageHeight);
       const tOcr = performance.now();
       const png = await encodeMat(cv, mask);
       const tEnd = performance.now();

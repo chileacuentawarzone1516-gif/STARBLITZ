@@ -12,10 +12,12 @@ import { hashBytes, hashText, type DocCache } from '../pipeline/cache';
 import { effectiveLang } from '../core/schema';
 import type { ChatMessage, LLMClient } from './llm';
 import {
-  KIND_LABELS, LANG_NAMES, REFUSAL_PATTERN, REVIEW_SCHEMA, SUMMARY_NOTE, TRANSLATION_SCHEMA, reviewerSystem, translatorSystem,
+  ECHO_NOTE, KIND_LABELS, LANG_NAMES, REFUSAL_PATTERN, REPAIR_HEADER, REVIEW_SCHEMA, SUMMARY_NOTE, TRANSLATION_SCHEMA, reviewerSystem,
+  translatorSystem,
 } from './prompts';
+import * as quality from './quality';
 
-export const REVIEW_FLAGS = new Set(['ambiguous', 'ocr_suspect', 'wordplay', 'refused']);
+export const REVIEW_FLAGS = new Set(['ambiguous', 'ocr_suspect', 'wordplay', 'refused', 'variant', 'name']);
 export const MAX_AUTO_GLOSSARY = 250;
 
 const QUOTES = /^[「『“"']+|[」』”"']+$/g;
@@ -30,6 +32,8 @@ export interface PageTranslation {
   newTerms: GlossaryEntry[];
   characters: Character[];
   reviewed: number;
+  /** Textos que necesitaron la llamada de reparación (desalineados, inventados, «vosotros», nombres, sin traducción). */
+  repaired?: number;
 }
 
 type Item = Record<string, unknown>;
@@ -114,7 +118,7 @@ export class ContextualTranslator implements PageTranslator {
       user += '\nSe adjunta la imagen de la página: cada texto está marcado con su número en un círculo. '
         + 'Úsala para identificar quién habla, a quién y con qué emoción.\n';
     }
-    user += `\nDevuelve un elemento en «items» por cada número traducible. En «page_summary»: ${SUMMARY_NOTE}`;
+    user += `\nDevuelve un elemento en «items» por cada número traducible. ${ECHO_NOTE} En «page_summary»: ${SUMMARY_NOTE}`;
 
     const result = await this.callJson('translate',
       [{ role: 'system', content: system }, { role: 'user', content: user, images: o.imageJpeg ? [o.imageJpeg] : [] }],
@@ -126,6 +130,10 @@ export class ContextualTranslator implements PageTranslator {
       const item = byN.get(numbering.get(r.id)!);
       if (item) drafts.set(r.id, item);
     }
+
+    const names = quality.knownNames(project.characters, effectiveGlossary(project, this.s.dictionary ?? []));
+    const repaired = await this.repair(project, page, targets, numbering, drafts, names, system,
+      this.contextBlock(project, page, o.prevPage, null, o.story, true), o.signal);
 
     let reviewed = 0;
     if (this.s.quality === 'max' && drafts.size) {
@@ -144,7 +152,19 @@ export class ContextualTranslator implements PageTranslator {
         updated.push(region);
         continue;
       }
-      const text = clean(str(item.final || item.translation));
+      let text = clean(str(item.final || item.translation));
+      const issues = quality.check(r.source_text, text, str(item.src_start), project.target_variant, names);
+      const blocking = issues.filter((i) => quality.BLOCKING.has(i));
+      if (blocking.length) {
+        // Ni tras la reparación es la traducción de ESTE texto: no se usa (el original se conserva en el dibujo).
+        region.translation = '';
+        region.flags = sortedUnion(region.flags, ['untranslated', ...blocking]);
+        region.status = 'review';
+        region.note = 'La traducción del modelo no correspondía a este texto (desalineada o inventada); tradúcelo a mano.';
+        updated.push(region);
+        continue;
+      }
+      text = quality.matchCase(r.source_text, text);
       if (isRefusal(text) && !isRefusal(r.source_text)) {
         // El modelo contestó con una negativa en lugar de traducir: no se guarda como traducción.
         region.translation = '';
@@ -154,7 +174,7 @@ export class ContextualTranslator implements PageTranslator {
         updated.push(region);
         continue;
       }
-      const flags = new Set((Array.isArray(item.flags) ? item.flags : []).filter((f): f is string => typeof f === 'string'));
+      const flags = new Set([...(Array.isArray(item.flags) ? item.flags : []).filter((f): f is string => typeof f === 'string'), ...issues]);
       const confidence = clamp('confidence' in item ? item.confidence : 0.8);
       region.translation = text;
       region.speaker = cut(str(item.speaker), 80);
@@ -180,7 +200,48 @@ export class ContextualTranslator implements PageTranslator {
       const gender = (['m', 'f', 'n', '?'] as const).find((g) => g === c.gender) ?? '?';
       characters.push({ source: cut(str(c.source).trim(), 80), target: cut(str(c.target).trim(), 80), gender, speech: cut(str(c.speech), 200), locked: false });
     }
-    return { updated, summary: cut(str(result.page_summary), 600), newTerms, characters, reviewed };
+    return { updated, summary: cut(str(result.page_summary), 600), newTerms, characters, reviewed, repaired };
+  }
+
+  // ------------------------------------------------------------------
+  /**
+   * Una sola llamada para los textos con problemas. La respuesta nueva solo sustituye a la anterior si ya no tiene problemas
+   * que impidan usarla. Devuelve cuántos textos se pidieron de nuevo (igual que `_repair` en Python).
+   */
+  private async repair(project: Project, page: Page, targets: Region[], numbering: Map<string, number>, drafts: Map<string, Item>,
+                       names: [string, string][], system: string, userContext: string, signal?: AbortSignal): Promise<number> {
+    const bad: [Region, string][] = [];
+    for (const r of targets) {
+      const d = drafts.get(r.id);
+      if (!d || !str(d.translation).trim()) { bad.push([r, quality.MISSING_TEXT]); continue; }
+      const text = clean(str(d.translation));
+      const issues = quality.check(r.source_text, text, str(d.src_start), project.target_variant, names);
+      if (issues.length) bad.push([r, quality.describe(issues, quality.lostNames(r.source_text, text, names))]);
+    }
+    if (!bad.length) return 0;
+    let user = `${userContext}\n\n${REPAIR_HEADER.replace('{page}', String(page.index + 1))}\n`;
+    for (const [r, problem] of bad) {
+      user += `[${numbering.get(r.id)}] (${KIND_LABELS[r.kind] ?? r.kind}, máx. ~${r.max_chars} caracteres) ${r.source_text}\n`;
+      user += `  Problema: ${problem}\n`;
+    }
+    user += `\nDevuelve un elemento en «items» por cada número de esta lista. ${ECHO_NOTE} En «page_summary» deja una cadena vacía.`;
+    let result: Record<string, unknown>;
+    try {
+      result = await this.callJson('translate', [{ role: 'system', content: system }, { role: 'user', content: user }],
+        TRANSLATION_SCHEMA, { model: this.model, signal }, bad.map(([r]) => r.source_text));
+    } catch (e) { // la reparación es una mejora: si falla, deciden las comprobaciones finales
+      if (e instanceof CancelledError) throw e;
+      console.warn(`Fallo en la reparación de la página ${page.index + 1}:`, e instanceof Error ? e.message : e);
+      return bad.length;
+    }
+    const byN = indexByNumber(result.items);
+    for (const [r] of bad) {
+      const it = byN.get(numbering.get(r.id)!);
+      if (!it || !str(it.translation).trim()) continue;
+      const again = quality.check(r.source_text, clean(str(it.translation)), str(it.src_start), project.target_variant, names);
+      if (!again.some((i) => quality.BLOCKING.has(i))) drafts.set(r.id, it);
+    }
+    return bad.length;
   }
 
   // ------------------------------------------------------------------
@@ -305,7 +366,8 @@ export function mergeMemory(project: Project, result: Pick<PageTranslation, 'new
 export function estimateMaxChars(box: [number, number, number, number], lineSize: number, pageHeight: number, inBubble: boolean): number {
   const [x1, y1, x2, y2] = box;
   const w = Math.max(1, x2 - x1), h = Math.max(1, y2 - y1);
-  const font = Math.max(lineSize * 0.8, pageHeight * 0.013, 11.0);
+  // Mismo cuerpo mínimo que el maquetador (`sizeBounds`, 0,8 % de la altura); antes 1,3 % y «too_long» saltaba casi siempre.
+  const font = Math.max(lineSize * 0.8, pageHeight * 0.008, 11.0);
   const fillRatio = inBubble ? 0.62 : 0.8; // los globos elípticos aprovechan menos superficie
   const perLine = Math.max(1.0, (w * 0.9) / (font * 0.55));
   const lines = Math.max(1.0, (h * 0.9) / (font * 1.15));

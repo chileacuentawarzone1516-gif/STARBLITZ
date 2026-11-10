@@ -7,6 +7,7 @@ import type { GlossaryEntry, Page, Project, Region } from '@starblitz/shared';
 import cases from '../fixtures/translate_cases.json';
 import { ContextualTranslator, estimateMaxChars, isRefusal, mergeMemory } from '../../src/engine/translate/contextual';
 import { LLMClient, parseJson, type ChatMessage } from '../../src/engine/translate/llm';
+import * as quality from '../../src/engine/translate/quality';
 
 class Scripted extends LLMClient {
   calls: { messages: { role: string; content: string; images: number }[]; schema: string; temperature: number; model: string }[] = [];
@@ -39,6 +40,7 @@ describe('traductor contextual (paridad con Python)', () => {
       expect(result.updated.map(strip)).toEqual(c.result.updated);
       expect(result.summary).toBe(c.result.summary);
       expect(result.reviewed).toBe(c.result.reviewed);
+      expect(result.repaired ?? 0).toBe((c.result as { repaired?: number }).repaired ?? 0);
       expect(result.newTerms).toEqual(c.result.new_terms);
       expect(result.characters).toEqual(c.result.characters);
       // Memoria de la obra tras incorporar lo aprendido
@@ -47,6 +49,17 @@ describe('traductor contextual (paridad con Python)', () => {
       expect(project.characters).toEqual(c.merged.characters);
     });
   }
+
+  it('controles de calidad (eco, invención, vosotros, nombres, mayúsculas) iguales que en Python', () => {
+    for (const q of (cases as unknown as { quality: { source: string; translation: string; echo: string; variant: string; names: [string, string][]; issues: string[]; case: string; length: number[]; echo_ok: boolean | null; lost: string[] }[] }).quality) {
+      const label = `${q.source} → ${q.translation}`;
+      expect(quality.check(q.source, q.translation, q.echo, q.variant, q.names), label).toEqual(q.issues);
+      expect(quality.matchCase(q.source, q.translation), label).toBe(q.case);
+      expect([quality.contentLength(q.source), quality.contentLength(q.translation)], label).toEqual(q.length);
+      expect(quality.echoMatches(q.source, q.echo), label).toBe(q.echo_ok);
+      expect(quality.lostNames(q.source, q.translation, q.names), label).toEqual(q.lost);
+    }
+  });
 
   it('detecta las negativas del modelo igual que Python', () => {
     for (const { text, match } of cases.refusal) expect(isRefusal(text), text).toBe(match);

@@ -40,6 +40,7 @@ export function ExportDialog({ project, pages, currentPageId, onClose }:
       const files = await exportPages(selected, {
         format, imageFormat: inner, quality: quality / 100, baseName: project.name,
         loadBase: (p) => loadPageBase(project.id, p),
+        loadOriginal: async (p) => createImageBitmap(await client().fetchBlob(client().imageUrl(project.id, p.id, 'original', p.updated))),
         onProgress: (d, t) => setProgress(d / t),
         signal: abort.current.signal,
       });

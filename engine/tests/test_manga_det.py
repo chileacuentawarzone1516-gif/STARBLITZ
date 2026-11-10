@@ -136,9 +136,7 @@ def test_real_model_detects_lines_on_a_synthetic_page(manga_det):
     assert 0 < (mask > 0).mean() < 0.1
 
 
-@pytest.mark.xfail(strict=True, reason="LIMITACIÓN CONOCIDA (2026-11-09): las líneas de PP-OCRv6 son más ajustadas que las del "
-                   "detector por defecto y el hueco entre líneas de un globo supera la regla de agrupación (0,8× el grosor); "
-                   "subir el umbral mezcla globos distintos en el corpus real. Solución prevista: agrupar por globo.")
+# Antes era un fallo esperado (2026-11-09): las líneas sueltas de un globo no se agrupaban. Lo resuelve `merge_by_bubble`.
 def test_real_model_groups_a_three_line_balloon_into_one_block(manga_det):
     blocks, _ = manga_det.detect(_page(["WHAT ARE YOU DOING", "HERE, PETER?", "GET TO CLASS!"]))
     assert any(len(b.lines) >= 3 for b in blocks)
@@ -177,15 +175,16 @@ def test_pipeline_accepts_the_experimental_detector(manga_det, tmp_path):
     assert page.status == "analyzed" and page.regions
     assert any("PETER" in r.source_text.upper() for r in page.regions)  # OCR real (PP-OCR) sobre lo detectado
     assert all(r.layout_box for r in page.regions)                  # cada región tiene dónde rotular
+    assert any(r.bubble for r in page.regions)                       # el globo de dos líneas se agrupa y se asocia
     svc.shutdown()
-    # Asociación con el globo: ver test_known_limitation_single_lines_do_not_find_their_balloon.
 
 
-@pytest.mark.xfail(strict=True, reason="LIMITACIÓN CONOCIDA (2026-11-09): con bloques de UNA línea, `find_bubble` descarta el globo "
-                   "(área > 6× la del bloque y ventana de búsqueda pequeña). Depende de agrupar por globo.")
+@pytest.mark.xfail(strict=True, reason="LIMITACIÓN CONOCIDA: un globo con UNA sola línea de texto (o dos líneas separadas por otro "
+                   "globo) es más de 6× el bloque y `find_bubble` lo descarta con sus límites normales; pasa igual con el "
+                   "detector por defecto. La agrupación por globo sí lo ve (búsqueda ampliada), pero el pipeline no la usa.")
 def test_known_limitation_single_lines_do_not_find_their_balloon(manga_det):
     from starblitz_engine.vision.bubbles import find_bubble
 
-    img = _page(["WHAT ARE YOU DOING", "HERE, PETER?"])
+    img = _page(["WHAT ARE YOU DOING?"])
     blocks, mask = manga_det.detect(img)
     assert any(find_bubble(img, mask, b) for b in blocks if b.bbox[1] < 520)

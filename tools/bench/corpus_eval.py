@@ -102,7 +102,11 @@ def instrument(svc: Services) -> None:
         return tr
 
     cls.analyze_page, cls.clean_page, cls.detector, cls.translator = analyze_page, clean_page, detector, translator
-    proc_mod.find_bubble = wrap(proc_mod.find_bubble, "globos")
+    # Asociación texto ↔ globo (el nombre cambió el 2026-11-09: búsqueda normal + ampliada exclusiva).
+    for name in ("find_bubble_exclusive", "find_bubble"):
+        if hasattr(proc_mod, name):
+            setattr(proc_mod, name, wrap(getattr(proc_mod, name), "globos"))
+            break
     proc_mod.detect_panels = wrap(proc_mod.detect_panels, "vinetas_orden")
     proc_mod.reading_order = wrap(proc_mod.reading_order, "vinetas_orden")
     router = p._ocr

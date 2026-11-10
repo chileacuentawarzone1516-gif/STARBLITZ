@@ -7,7 +7,7 @@ import { newId } from '../core/ids';
 import { defaultStyle, newRegion } from '../core/schema';
 import { cropClone, scoped, type Cv, type Mat } from '../runtime/cv';
 import { estimateMaxChars } from '../translate/contextual';
-import { findBubble, textRingStats, type BubbleInfo } from './bubbles';
+import { findBubbleExclusive, textRingStats, type BubbleInfo } from './bubbles';
 import type { Box, DetectedBlock, Poly } from './types';
 
 /** Área de un polígono (fórmula de Gauss con coordenadas enteras, como `cv2.contourArea`). */
@@ -141,13 +141,15 @@ export interface MakeRegionInput {
   sfx: 'keep' | 'note';
   pageHeight: number;
   regionId?: string | null;
+  /** Centros de los demás textos de la página: el globo de la búsqueda ampliada no puede contener ninguno. */
+  others?: [number, number][];
 }
 
 const round1 = (v: number) => Math.round(v * 10) / 10;
 
 export function makeRegion(cv: Cv, i: MakeRegionInput): Region {
   const { img, mask, block } = i;
-  const bubble = findBubble(cv, img, mask, block);
+  const bubble = findBubbleExclusive(cv, img, mask, block, i.others ?? []);
   const [x1, y1, x2, y2] = block.bbox;
   const bw = x2 - x1, bh = y2 - y1;
   const h = img.rows, w = img.cols;
@@ -181,4 +183,44 @@ export function makeRegion(cv: Cv, i: MakeRegionInput): Region {
     // Las onomatopeyas forman parte del dibujo: no se borran; con sfx="note" se rotula su traducción encima.
     erase: kind !== 'sfx', render: kind !== 'sfx' || i.sfx === 'note',
   });
+}
+
+/**
+ * Evita que dos traducciones se rotulen una encima de otra (port de `separate_layouts` del motor del PC). Cuando dos cajas de
+ * maquetación se pisan, se cortan por la línea media entre los TEXTOS ORIGINALES, en el eje en que están más separados; ninguna
+ * caja se reduce por debajo de su texto original y, si los propios textos se solapan, no se toca nada. Devuelve cuántas cambió.
+ */
+export function separateLayouts(regions: Region[], pageHeight: number): number {
+  const changed = new Set<string>();
+  for (let i = 0; i < regions.length; i++) {
+    for (let j = i + 1; j < regions.length; j++) {
+      const a = regions[i], b = regions[j];
+      const la = a.layout_box, lb = b.layout_box;
+      if (Math.min(la[2], lb[2]) <= Math.max(la[0], lb[0]) || Math.min(la[3], lb[3]) <= Math.max(la[1], lb[1])) continue;
+      const ta = a.bbox, tb = b.bbox;
+      const gapX = Math.max(tb[0] - ta[2], ta[0] - tb[2]);
+      const gapY = Math.max(tb[1] - ta[3], ta[1] - tb[3]);
+      if (gapX < 0 && gapY < 0) continue;
+      if (gapX >= gapY) {
+        const [left, right] = ta[0] <= tb[0] ? [a, b] : [b, a];
+        const cut = Math.floor((left.bbox[2] + right.bbox[0]) / 2);
+        const lo = [...left.layout_box] as Box, ro = [...right.layout_box] as Box;
+        lo[2] = Math.max(Math.min(lo[2], cut), left.bbox[2]);
+        ro[0] = Math.min(Math.max(ro[0], cut), right.bbox[0]);
+        left.layout_box = lo; right.layout_box = ro;
+      } else {
+        const [top, bottom] = ta[1] <= tb[1] ? [a, b] : [b, a];
+        const cut = Math.floor((top.bbox[3] + bottom.bbox[1]) / 2);
+        const to = [...top.layout_box] as Box, bo = [...bottom.layout_box] as Box;
+        to[3] = Math.max(Math.min(to[3], cut), top.bbox[3]);
+        bo[1] = Math.min(Math.max(bo[1], cut), bottom.bbox[1]);
+        top.layout_box = to; bottom.layout_box = bo;
+      }
+      changed.add(a.id); changed.add(b.id);
+    }
+  }
+  for (const r of regions) {
+    if (changed.has(r.id)) r.max_chars = estimateMaxChars(r.layout_box, r.line_size, pageHeight, r.bubble !== null);
+  }
+  return changed.size;
 }

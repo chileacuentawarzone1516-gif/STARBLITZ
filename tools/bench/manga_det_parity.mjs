@@ -55,7 +55,8 @@ for (const f of files) {
   const { mask_png: maskPng, ...rest } = r;
   writeFileSync(join(out, f.replace(/\.\w+$/, '.json')), JSON.stringify(rest));
   writeFileSync(join(out, f.replace(/\.\w+$/, '.mask.png')), Buffer.from(maskPng.split(',')[1], 'base64'));
-  summary.push({ page: f, ms: r.ms, infer_ms: r.infer_ms, blocks: r.blocks.length, lines: r.blocks.reduce((n, b) => n + b.lines.length, 0), isolated: r.isolated });
+  summary.push({ page: f, ms: r.ms, infer_ms: r.infer_ms, blocks: r.blocks.length, lines: r.blocks.reduce((n, b) => n + b.lines.length, 0), isolated: r.isolated,
+    cv_heap_mb: r.cv_heap_mb, js_heap_mb: r.js_heap_mb });
   console.log(JSON.stringify(summary.at(-1)));
 }
 writeFileSync(join(out, 'summary.json'), JSON.stringify({ isolated, errors, pages: summary }, null, 1));

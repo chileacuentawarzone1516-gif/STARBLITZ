@@ -15,7 +15,7 @@ LANG_NAMES = {
 VARIANTS = {
     "es-419": (
         "español latinoamericano neutro",
-        "Usa «ustedes» (nunca «vosotros»), vocabulario comprensible en toda Latinoamérica y evita regionalismos "
+        "Usa «ustedes» (nunca «vosotros» ni sus formas: «tenéis», «id», «os», «vuestro»), vocabulario comprensible en toda Latinoamérica y evita regionalismos "
         "marcados (nada de «vale», «tío», «guay», «che», «güey», «pana»). Tuteo por defecto entre jóvenes y amigos; "
         "«usted» cuando el original marque respeto o distancia.",
     ),
@@ -92,8 +92,9 @@ Principios, por orden de prioridad:
 2. NATURALIDAD: escribe lo que diría un hablante nativo en esa situación. Sustituye modismos, refranes, juegos de palabras y bromas por equivalentes españoles con el mismo efecto. Evita calcos y construcciones literales («¿Es así?», «Como esperaba de…», «¡Lo haré lo mejor posible!» cuando suenan forzadas).
 3. VOZ DEL PERSONAJE: respeta personalidad, edad, registro (formal o coloquial, tú o usted) y muletillas, con coherencia en todo el capítulo.
 4. TONO Y EMOCIÓN: transmite humor, sarcasmo, ironía, enfado, ternura o tensión. Si hay sarcasmo o doble sentido, que también se note en español.
-5. COHERENCIA: usa SIEMPRE los nombres y términos del glosario y de la lista de personajes. Mantén la continuidad con las páginas anteriores.
+5. COHERENCIA: usa SIEMPRE los nombres y términos del glosario y de la lista de personajes. Mantén la continuidad con las páginas anteriores. Los NOMBRES PROPIOS de personas, lugares (ciudades, barrios, calles), empresas, marcas y títulos NO se traducen: cópialos tal cual («Brooklyn», «Shinjuku», «Kim Min-ji», «Acme Corp.»), salvo que el glosario diga otra cosa.
 6. LETRISMO: frases claras y de longitud similar al original; respeta el límite orientativo de caracteres del globo si es posible sin perder significado. Ortografía y puntuación españolas (¿?, ¡!, puntos suspensivos «…», raya de diálogo no se usa en globos). Mantén los gritos, titubeos («¿Q-qué…?») y alargamientos con recursos naturales del español.
+7. GÉNERO: concuerda adjetivos, participios y pronombres con el género de quien habla y de a quién se habla (lista de PERSONAJES, imagen y contexto). Si no se sabe, usa una forma que no marque género.
 
 {variant_rules}
 {honorifics}
@@ -132,6 +133,7 @@ TRANSLATION_SCHEMA: dict = {
                 "type": "object",
                 "properties": {
                     "n": {"type": "integer"},
+                    "src_start": {"type": "string"},
                     "translation": {"type": "string"},
                     "speaker": {"type": "string"},
                     "emotion": {"type": "string"},
@@ -140,7 +142,7 @@ TRANSLATION_SCHEMA: dict = {
                     "note": {"type": "string"},
                     "source_fix": {"type": "string"},
                 },
-                "required": ["n", "translation", "speaker", "emotion", "confidence", "flags", "note", "source_fix"],
+                "required": ["n", "src_start", "translation", "speaker", "emotion", "confidence", "flags", "note", "source_fix"],
             },
         },
         "new_terms": {
@@ -186,3 +188,9 @@ REVIEW_SCHEMA: dict = {
     },
     "required": ["items"],
 }
+
+# Frase que se añade a la petición de traducción: el eco del original permite comprobar que cada traducción es de SU texto.
+ECHO_NOTE = ("En «src_start» copia literalmente las 3 primeras palabras del ORIGINAL de ese número (sirve para comprobar que "
+             "ninguna traducción se cambia de globo).")
+REPAIR_HEADER = ("CORRIGE ESTOS TEXTOS DE LA PÁGINA {page} (cada uno lleva el problema detectado en la traducción anterior). "
+                 "Traduce SOLO estos números, solo lo que dice cada original y sin mirar la página siguiente:")

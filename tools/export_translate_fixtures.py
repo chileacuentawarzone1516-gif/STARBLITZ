@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "engine"))
 from starblitz_engine.core.settings import TranslationSettings  # noqa: E402
 from starblitz_engine.projects.schema import Character, GlossaryEntry, Page, Project, Region  # noqa: E402
 from starblitz_engine.translate import prompts as P  # noqa: E402
+from starblitz_engine.translate import quality as Q  # noqa: E402
 from starblitz_engine.translate.contextual import (  # noqa: E402
     _REFUSAL, ContextualTranslator, PageTranslation, estimate_max_chars, merge_memory,
 )
@@ -88,6 +89,7 @@ def run_case(name: str, proj: Project, pg: Page, prev: Page | None, nxt: Page | 
                                "dictionary": [d.model_dump(mode="json") for d in dictionary]}},
         "calls": client.calls,
         "result": {"updated": [dump_region(r) for r in result.updated], "summary": result.summary, "reviewed": result.reviewed,
+                   "repaired": result.repaired,
                    "new_terms": [t.model_dump(mode="json") for t in result.new_terms],
                    "characters": [c.model_dump(mode="json") for c in result.characters]},
         "merged": {"glossary": [g.model_dump(mode="json") for g in proj.glossary],
@@ -100,7 +102,7 @@ def j(**kw) -> str:
 
 
 def item(n: int, tr: str, **kw) -> dict:
-    return {"n": n, "translation": tr, "speaker": kw.get("speaker", "Asami"), "emotion": kw.get("emotion", "neutral"),
+    return {"n": n, "src_start": kw.get("src", ""), "translation": tr, "speaker": kw.get("speaker", "Asami"), "emotion": kw.get("emotion", "neutral"),
             "confidence": kw.get("confidence", 0.9), "flags": kw.get("flags", []), "note": kw.get("note", ""),
             "source_fix": kw.get("source_fix", "")}
 
@@ -157,7 +159,9 @@ def build_cases() -> list[dict]:
         item(1, "Lo siento, pero no puedo ayudar con eso."),
         item(2, "Esta es una frase bastante larga para el globo", confidence=0.95),
         item(4, "¿De verdad?", confidence="alta"),
-    ], new_terms=[], characters=[], page_summary="")]
+    ], new_terms=[], characters=[], page_summary=""),
+        # Reparación del elemento ausente (3): esta vez el modelo tampoco lo devuelve → queda «sin traducir».
+        j(items=[item(1, "Lo siento, pero no puedo ayudar con eso.")], new_terms=[], characters=[], page_summary="")]
     cases.append(run_case("negativa-largo-ausente", project(), cur, None, None, [], False, script))
 
     # 5) JSON mal formado la primera vez: se reintenta con instrucciones de reparación.
@@ -196,7 +200,36 @@ def build_cases() -> list[dict]:
     script = [j(items=[item(1, "Se me antoja un ramen", confidence=0.9)], new_terms=[], characters=[], page_summary="Antojo."),
               j(items=[{"n": 1, "final": "Se me antoja un ramen", "issue": "", "confidence": 0.9}])]
     cases.append(run_case("perfil-adaptacion-revision", project(translation_profile="adaptacion"), cur, None, None, [], False, script, quality="max"))
+
+    # Controles de calidad y llamada de reparación (2026-11-09): cómic occidental en MAYÚSCULAS.
+    en = dict(source_lang="en", characters=[Character(source="Mary Jane", target="Mary Jane", gender="f")], glossary=[], synopsis="", style_notes="")
+    nxt_en = page("g3", 2, [region(1, "PETER? PETER? WHAT DID WE SAY ABOUT READING AT THE TABLE?")])
+    cur = page("g2", 1, [region(1, "PARKER HOME, QUEENS", kind="narration"), region(2, "WHAT?", kind="dialogue"),
+                         region(3, "ISN'T THAT MARY JANE OVER THERE?", kind="dialogue"), region(4, "DO YOU GUYS HAVE PRACTICE?", kind="dialogue"),
+                         region(5, "SEE YOU LATER", kind="dialogue")])
+    first = j(items=[
+        item(1, "¿Peter? ¿Peter? ¿Qué dijimos sobre leer en la mesa?", src="PETER? PETER? WHAT"),   # traduce la página SIGUIENTE
+        item(2, "Eso debería mantenerla ocupada durante horas y horas, ya lo verás.", src="WHAT"),       # inventa
+        item(3, "¿No es esa María-Jane de ahí?", src="ISN'T THAT MARY"),                             # cambia el nombre
+        item(4, "¿No tenéis práctica?", src="DO YOU GUYS"),                                           # vosotros en es-419
+    ], new_terms=[], characters=[], page_summary="Casa de Parker.")                                   # el 5 falta
+    repair = j(items=[
+        item(1, "Casa de los Parker, Queens", src="PARKER HOME, QUEENS"),
+        item(2, "Eso debería mantenerla ocupada durante horas y horas, ya lo verás.", src="WHAT"),       # sigue inventando → sin traducción
+        item(3, "¿No es esa Mary Jane de ahí?", src="ISN'T THAT MARY"),
+        item(4, "¿No tienen práctica?", src="DO YOU GUYS"),
+        item(5, "Nos vemos luego", src="SEE YOU LATER"),
+    ], new_terms=[], characters=[], page_summary="")
+    cases.append(run_case("reparacion-calidad", project(**en), cur, None, nxt_en, [], False, [first, repair]))
+    # Sin problemas: una sola llamada, y la traducción sale en MAYÚSCULAS como el original.
+    cur = page("g2", 1, [region(1, "UNCLE BEN? WHAT ARE YOU DOING HERE?", kind="dialogue"), region(2, "Based on the original story", kind="narration")])
+    ok = j(items=[item(1, "¿Tío Ben? ¿Qué haces aquí?", src="UNCLE BEN WHAT"), item(2, "Basado en la historia original", src="Based on the")],
+           new_terms=[], characters=[], page_summary="Peter ve a su tío.")
+    cases.append(run_case("sin-reparacion-mayusculas", project(**en), cur, None, None, [], False, [ok]))
     return cases
+
+
+QUALITY_CASES = [('HE PARKER HOME FOREST HILLS', '¿Peter? ¿Qué dijimos?', 'PETER? PETER?', 'es-419', []), ('WHAT?', 'Eso debería mantenerla ocupada durante horas.', 'WHAT', 'es-419', []), ("DON'T YOU PUNKS HAVE PRACTICE?", '¿NO TENÉIS PRÁCTICAS? ¡ID A JUGAR!', "DON'T YOU PUNKS", 'es-419', []), ("DON'T YOU PUNKS HAVE PRACTICE?", '¿NO TENÉIS PRÁCTICAS?', "DON'T YOU", 'es-ES', []), ("ISN'T THAT MARY JANE?", '¿NO ES ESA MARÍA-JANE?', "ISN'T THAT", 'es-419', [['Mary Jane', 'Mary Jane']]), ('P.S. 163 QUEENS DISTRICT', 'P.S. 163, DISTRITO DE QUEENS', 'P.S. 163', 'es-419', [['Queens', 'Queens']]), ('TWC TIMES! HA HA!', '¡DOS VECES! ¡JA, JA!', 'TWO TIMES', 'es-419', []), ('すまん、田中！', '¡Lo siento, Tanaka! No volverá a pasar.', 'すまん', 'es-419', [['田中', 'Tanaka']]), ('すまん、田中！', '¡Lo siento!', '先輩', 'es-419', [['田中', 'Tanaka']]), ('미안해, 민지야', 'Lo siento, Min-ji', '', 'es-419', []), ('Based on the story', 'Basado en la historia', 'Based on', 'es-419', []), ('No me gusta este país', 'No me gusta este país y tengo sed', 'No me', 'es-419', []), ('', '', '', 'es-419', [])]
 
 
 def main() -> None:
@@ -205,6 +238,11 @@ def main() -> None:
         "kind_labels": P.KIND_LABELS, "translator_system": P.TRANSLATOR_SYSTEM, "reviewer_system": P.REVIEWER_SYSTEM,
         "profiles": {k: list(v) for k, v in P.PROFILES.items()}, "summary_note": P.SUMMARY_NOTE, "flag_enum": P.FLAG_ENUM, "translation_schema": P.TRANSLATION_SCHEMA,
         "review_schema": P.REVIEW_SCHEMA, "refusal_pattern": _REFUSAL.pattern,
+        "echo_note": P.ECHO_NOTE, "repair_header": P.REPAIR_HEADER,
+        "quality": {"echo_words": Q.ECHO_WORDS, "echo_window": Q.ECHO_WINDOW, "echo_similarity": Q.ECHO_SIMILARITY,
+                    "invented_ratio": Q.INVENTED_RATIO, "invented_slack": Q.INVENTED_SLACK, "cjk": Q.CJK, "cjk_weight": Q.CJK_WEIGHT,
+                    "vosotros_pattern": Q.VOSOTROS_PATTERN, "issue_text": Q.ISSUE_TEXT, "missing_text": Q.MISSING_TEXT,
+                    "blocking": list(Q.BLOCKING)},
     }
     # Lo que necesitan las interfaces (PC y móvil) para mostrar los perfiles: nombre y descripción, sin las instrucciones del modelo.
     OUT_PROFILES.write_text(json.dumps({"default": P.DEFAULT_PROFILE, "profiles": [{"id": k, "label": v[0], "description": v[1]} for k, v in P.PROFILES.items()]},
@@ -219,6 +257,11 @@ def main() -> None:
         "estimate": [{"box": list(b), "line": ls, "h": ph, "bubble": ib, "out": estimate_max_chars(b, ls, ph, ib)}
                      for b in ((0, 0, 100, 200), (10, 20, 300, 120), (0, 0, 40, 40), (5, 5, 900, 700), (0, 0, 1, 1))
                      for ls in (0.0, 12.0, 30.5, 80.0) for ph in (800, 1200, 2400) for ib in (True, False)],
+        "quality": [{"source": src, "translation": tr, "echo": echo, "variant": var, "names": names,
+                     "issues": Q.check(src, tr, echo, var, [tuple(n) for n in names]), "case": Q.match_case(src, tr),
+                     "length": [Q.content_length(src), Q.content_length(tr)], "echo_ok": Q.echo_matches(src, echo),
+                     "lost": Q.lost_names(src, tr, [tuple(n) for n in names])}
+                    for src, tr, echo, var, names in QUALITY_CASES],
         "parse_json": [{"raw": r, "out": _try_parse(r)} for r in (
             '{"a": 1}', '```json\n{"a": 2}\n```', '<think>pensando {x}</think>\n{"a": 3}', 'texto antes {"a": 4} texto después',
             '[1, 2]', 'sin json', '{"a": ', '')],

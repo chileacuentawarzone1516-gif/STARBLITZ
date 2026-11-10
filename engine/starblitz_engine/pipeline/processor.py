@@ -32,7 +32,7 @@ from ..render.inpaint import EraseTarget, Inpainter
 from ..translate.contextual import _REFUSAL, ContextualTranslator, estimate_max_chars, merge_memory
 from ..translate.plain import make_translator
 from ..translate.llm import create_client
-from ..vision.bubbles import find_bubble, text_ring_stats
+from ..vision.bubbles import find_bubble_exclusive, text_ring_stats
 from ..vision.detector import DetectedBlock, TextDetector
 from ..vision.manga_det import MangaLineDetector
 from ..vision.langid import direction_for, guess_from_blocks, guess_from_text
@@ -354,11 +354,12 @@ class Processor:
         median_line = float(np.median([b.line_size for b in blocks])) if blocks else 0.0
         keep = {r.id: r for r in page.regions if r.status in ("approved", "edited")}
         regions: list[Region] = []
+        centers = [((b.bbox[0] + b.bbox[2]) / 2, (b.bbox[1] + b.bbox[3]) / 2) for b in blocks]
         for rank, bi in enumerate(order):
             block = blocks[bi]
             ocr = engine.recognize(img, block)
             region = self._make_region(project, page, img, mask, block, ocr.text, ocr.confidence, ocr.engine,
-                                       rank, median_line)
+                                       rank, median_line, others=[c for k, c in enumerate(centers) if k != bi])
             if not ocr.text.strip():
                 # Antes se descartaba en silencio y el texto «desaparecía». Ahora queda visible para revisarlo: el original
                 # no se borra (no hay traducción) y la persona puede escribirlo o volver a leer el área.
@@ -366,6 +367,7 @@ class Processor:
                 region.status = "review"
                 region.note = "El OCR no pudo leer este texto: escríbelo a mano o vuelve a leer el área."
             regions.append(region)
+        separate_layouts(regions, page.height)
         # Se conservan los textos que el usuario ya revisó si siguen en el mismo sitio.
         for r in regions:
             for old in keep.values():
@@ -380,9 +382,9 @@ class Processor:
         return page
 
     def _make_region(self, project: Project, page: Page, img: np.ndarray, mask: np.ndarray, block: DetectedBlock,
-                     text: str, conf: float, engine: str, order: int, median_line: float, region_id: str | None = None
-                     ) -> Region:
-        bubble = find_bubble(img, mask, block)
+                     text: str, conf: float, engine: str, order: int, median_line: float, region_id: str | None = None,
+                     others: list[tuple[float, float]] | None = None) -> Region:
+        bubble = find_bubble_exclusive(img, mask, block, others or [])
         x1, y1, x2, y2 = block.bbox
         bw, bh = x2 - x1, y2 - y1
         h, w = img.shape[:2]
@@ -730,3 +732,44 @@ class _Progress:
     def _push(self, current: str | None, stage: str) -> None:
         frac = (self.pre + self.skipped_units + self.done_units) / self.total
         self.ctx.update(min(frac, 0.999), eta_s=self.eta(), detail=self.detail(current, stage))
+
+
+def separate_layouts(regions: list[Region], page_height: int) -> int:
+    """Evita que dos traducciones se rotulen una encima de otra.
+
+    Cada caja de maquetación (`layout_box`) crece hacia el globo o el espacio libre; cuando dos globos están pegados, o dos textos
+    comparten globo, las cajas se pisan y el rotulado sale superpuesto (medido el 2026-11-09 en un capítulo real). Regla general:
+    se corta por la línea media entre los TEXTOS ORIGINALES, en el eje en que están más separados, y ninguna caja se reduce por
+    debajo de su texto original (que ya cabía ahí). Si los propios textos se solapan, no se toca nada. Devuelve cuántas cajas cambió.
+    """
+    changed: set[str] = set()
+    for i, a in enumerate(regions):
+        for b in regions[i + 1:]:
+            la, lb = list(a.layout_box), list(b.layout_box)
+            if min(la[2], lb[2]) <= max(la[0], lb[0]) or min(la[3], lb[3]) <= max(la[1], lb[1]):
+                continue  # las cajas no se tocan
+            ta, tb = a.bbox, b.bbox
+            gap_x = max(tb[0] - ta[2], ta[0] - tb[2])
+            gap_y = max(tb[1] - ta[3], ta[1] - tb[3])
+            if gap_x < 0 and gap_y < 0:
+                continue  # los textos originales se solapan: no hay corte limpio
+            if gap_x >= gap_y:
+                left, right = (a, b) if ta[0] <= tb[0] else (b, a)
+                cut = (left.bbox[2] + right.bbox[0]) // 2
+                lo, ro = list(left.layout_box), list(right.layout_box)
+                lo[2] = max(min(lo[2], cut), left.bbox[2])
+                ro[0] = min(max(ro[0], cut), right.bbox[0])
+                left.layout_box, right.layout_box = tuple(lo), tuple(ro)
+            else:
+                top, bottom = (a, b) if ta[1] <= tb[1] else (b, a)
+                cut = (top.bbox[3] + bottom.bbox[1]) // 2
+                to, bo = list(top.layout_box), list(bottom.layout_box)
+                to[3] = max(min(to[3], cut), top.bbox[3])
+                bo[1] = min(max(bo[1], cut), bottom.bbox[1])
+                top.layout_box, bottom.layout_box = tuple(to), tuple(bo)
+            changed.update((a.id, b.id))
+    for r in regions:
+        if r.id in changed:
+            r.max_chars = estimate_max_chars(r.layout_box, r.line_size, page_height, r.bubble is not None)
+    return len(changed)
+

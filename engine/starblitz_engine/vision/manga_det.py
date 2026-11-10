@@ -71,7 +71,7 @@ class MangaLineDetector:
             keep = _dedupe_across([np.array(_poly_bbox(p)) for p in lines], part_of, scores)
             lines, scores = [lines[i] for i in keep], [scores[i] for i in keep]
         mask = line_mask(img_bgr, lines)
-        return group_lines(lines, scores, w, h), mask
+        return merge_by_bubble(img_bgr, mask, group_lines(lines, scores, w, h), w, h), mask
 
     # ------------------------------------------------------------------
     def probability(self, img_bgr: np.ndarray) -> tuple[np.ndarray, float, float]:
@@ -128,25 +128,90 @@ def db_lines(prob: np.ndarray, sx: float, sy: float, w: int, h: int) -> tuple[li
     return lines, scores
 
 
+def make_block(group: list[np.ndarray], confidence: float, w: int, h: int) -> DetectedBlock:
+    """Bloque a partir de sus líneas: rectángulo, orientación y cuerpo de letra."""
+    geoms = [_line_geometry(p) for p in group]
+    pts = np.concatenate(group, axis=0)
+    x1, y1, x2, y2 = _poly_bbox(pts)
+    elongated = [g for g in geoms if g[0] > g[1] * 1.5]
+    if elongated:
+        vertical = sum(1 for g in elongated if g[2]) * 2 > len(elongated)
+    else:
+        vertical = (y2 - y1) > (x2 - x1) * 1.2
+    return DetectedBlock(bbox=(max(0, x1), max(0, y1), min(w, x2), min(h, y2)), lines=group, vertical=vertical,
+                         confidence=confidence, line_size=float(np.median([g[1] for g in geoms])))
+
+
 def group_lines(lines: list[np.ndarray], scores: list[float], w: int, h: int) -> list[DetectedBlock]:
     """Bloques a partir de líneas (el modelo no detecta bloques ni globos)."""
     score_of = {id(p): s for p, s in zip(lines, scores)}
     blocks: list[DetectedBlock] = []
     for group in _cluster_lines(lines):
-        geoms = [_line_geometry(p) for p in group]
-        pts = np.concatenate(group, axis=0)
-        x1, y1, x2, y2 = _poly_bbox(pts)
-        elongated = [g for g in geoms if g[0] > g[1] * 1.5]
-        if elongated:
-            vertical = sum(1 for g in elongated if g[2]) * 2 > len(elongated)
-        else:
-            vertical = (y2 - y1) > (x2 - x1) * 1.2
-        b = DetectedBlock(bbox=(max(0, x1), max(0, y1), min(w, x2), min(h, y2)), lines=group, vertical=vertical,
-                          confidence=float(np.mean([score_of[id(p)] for p in group])),
-                          line_size=float(np.median([g[1] for g in geoms])))
+        b = make_block(group, float(np.mean([score_of[id(p)] for p in group])), w, h)
         if b.area >= 64:
             blocks.append(b)
     return blocks
+
+
+# Ruido (números de página, tramas, trazos del dibujo): UNA línea, fuera de globo, mucho más fina que el texto de la página y corta.
+# Medido el 2026-11-09: descarta 30 fragmentos de ≤ 3 caracteres y ningún texto más largo (el texto pequeño pero largo se queda).
+NOISE_THICKNESS = 0.6
+NOISE_MAX_ELONGATION = 4.0
+
+
+# Coste (medido el 2026-11-09): buscar con la ventana ampliada para CADA bloque costaba ~1,1 s por página. Primero se prueba la
+# búsqueda normal (barata), la ampliada solo si falla (margen ≤ 1× el lado mayor), y no se busca el globo de un bloque que ya
+# quedó dentro de otro: misma agrupación en el corpus y un 38 % menos de tiempo.
+
+
+def merge_by_bubble(img_bgr: np.ndarray, mask: np.ndarray, blocks: list[DetectedBlock], w: int, h: int) -> list[DetectedBlock]:
+    """Une los bloques que caen dentro del MISMO globo (medido 2026-11-09: el modelo da líneas muy ajustadas y la regla de
+    párrafos dejaba cada línea de un globo como un bloque suelto; además un bloque de una línea no encontraba su globo)."""
+    from .bubbles import GROUP_MIN_MARGIN, find_bubble, find_bubble_wide, point_in_polygon
+
+    n = len(blocks)
+    if n < 2:
+        return blocks
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    centers = [((b.bbox[0] + b.bbox[2]) / 2, (b.bbox[1] + b.bbox[3]) / 2) for b in blocks]
+    has_bubble = [False] * n
+    for i, b in enumerate(blocks):
+        if has_bubble[i]:
+            continue  # ya está dentro del globo de otro bloque
+        bubble = find_bubble(img_bgr, mask, b) or find_bubble_wide(img_bgr, mask, b, GROUP_MIN_MARGIN)
+        if bubble is None:
+            continue
+        has_bubble[i] = True
+        for j in range(n):
+            if j != i and b.vertical == blocks[j].vertical and point_in_polygon(*centers[j], bubble.polygon):
+                parent[find(j)] = find(i)
+                has_bubble[j] = True
+    groups: dict[int, list[int]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+    median_line = float(np.median([b.line_size for b in blocks]))
+    out: list[DetectedBlock] = []
+    for members in sorted(groups.values(), key=lambda m: m[0]):
+        if len(members) == 1:
+            b = blocks[members[0]]
+            long_side = max(b.bbox[2] - b.bbox[0], b.bbox[3] - b.bbox[1])
+            if (len(b.lines) == 1 and not has_bubble[members[0]] and b.line_size < NOISE_THICKNESS * median_line
+                    and long_side < NOISE_MAX_ELONGATION * b.line_size):
+                continue  # ruido: no se convierte en región
+            out.append(b)
+            continue
+        lines = [p for k in members for p in blocks[k].lines]
+        weights = [len(blocks[k].lines) for k in members]
+        confidence = float(sum(blocks[k].confidence * wk for k, wk in zip(members, weights)) / sum(weights))
+        out.append(make_block(lines, confidence, w, h))
+    return out
 
 
 def line_mask(img_bgr: np.ndarray, lines: list[np.ndarray]) -> np.ndarray:

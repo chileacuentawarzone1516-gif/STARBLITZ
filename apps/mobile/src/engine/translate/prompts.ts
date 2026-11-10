@@ -14,6 +14,8 @@ export const SUMMARY_NOTE = raw.summary_note;
 export const TRANSLATION_SCHEMA = raw.translation_schema as Record<string, unknown>;
 export const REVIEW_SCHEMA = raw.review_schema as Record<string, unknown>;
 export const REFUSAL_PATTERN = raw.refusal_pattern;
+export const ECHO_NOTE = raw.echo_note;
+export const REPAIR_HEADER = raw.repair_header;
 
 /** Sustituye `{nombre}` por su valor (sin interpretar caracteres especiales del texto de reemplazo). */
 function fill(template: string, values: Record<string, string>): string {

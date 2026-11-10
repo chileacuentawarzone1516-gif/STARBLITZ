@@ -12,6 +12,7 @@ Compara modelos de traducción GGUF con el mismo `llama-server` que usa STARBLIT
 | `detector_latency.mjs` | Latencia de inferencia de modelos de detección con ONNX Runtime Web (WebAssembly, 1 hilo) en Node; no valida precisión |
 | `results/` | Resultados crudos (JSON) de las ejecuciones citadas en [BENCHMARK-TRADUCCION](../../docs/BENCHMARK-TRADUCCION.md) |
 | `corpus_eval.py` | **Pipeline completo del motor de escritorio sobre un capítulo real** (importación → análisis → traducción → reconstrucción) con la API real; desglosa el tiempo por página y etapa (detección, viñetas, OCR, globos, traducción, reconstrucción) y muestrea RAM/CPU. El cómic se pasa por ruta y **nunca** se copia al repositorio. Ver [EVALUACION-CORPUS-USM](../../docs/EVALUACION-CORPUS-USM.md) |
+| `compare_versions.py` | Antes/después de dos ejecuciones del mismo capítulo: globos reales, cajas solapadas, estados y marcas de traducción, «vosotros», mayúsculas, textos que no caben o se restauran al original y tiempos por etapa |
 | `corpus_compare.py` | Compara dos evaluaciones (p. ej. detector por defecto frente al experimental) página a página, con la capa de texto del PDF como **indicador** independiente de cobertura (no es verdad de terreno) |
 | `export_render.mjs` | Rotula y exporta las páginas traducidas con el renderizador **compartido** de las apps (el mismo de «Exportar»), en Chromium |
 | `manga_det_parity.mjs`, `manga_det_compare.py` | Paridad del detector experimental entre el motor móvil (TypeScript + WASM, en Chromium) y el de escritorio (Python) sobre las mismas páginas |

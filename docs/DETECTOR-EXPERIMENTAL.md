@@ -28,7 +28,11 @@ Estado: **EXPERIMENTAL, desactivado por defecto.** El detector predeterminado si
 1. Post-procesado DB → polígonos de línea a la escala de la página; páginas alargadas por **tramos** (igual que el detector actual).
 2. **Agrupación** de líneas en bloques/párrafos con la misma regla del detector actual para el texto fuera de globos (`cluster_lines`).
 3. **Máscara de trazos**: dentro de cada línea, Otsu separa trazos y fondo (la clase minoritaria son los trazos) y se dilata 2 px.
-4. La **asociación con globos**, el orden de lectura, el OCR, la reconstrucción y la rotulación **no cambian**: son las del pipeline.
+4. **Agrupación por globo** (2026-11-09, fase 2): para cada bloque se busca su globo con una búsqueda ampliada (ventana ≥ 2,5× el lado
+   mayor; globo ≤ 40× el bloque) y se unen los bloques cuyo centro cae dentro del mismo globo (misma orientación).
+5. **Ruido** (fase 2): se descarta una línea suelta fuera de globo que sea mucho más fina que el texto de la página (< 0,6× el grosor
+   mediano) y corta (< 4× su grosor). En el corpus quitó 30 fragmentos de ≤ 3 caracteres y ningún texto más largo.
+6. El orden de lectura, el OCR, la reconstrucción y la rotulación son las del pipeline.
 
 ## 2. Cómo activarlo
 
@@ -55,9 +59,26 @@ Detalle, método y límites en [EVALUACION-CORPUS-USM](EVALUACION-CORPUS-USM.md)
 
 - **Lado largo 1600 en vez de 960** (valor de la ficha): a 960 se perdía la mitad de las líneas de una doble página (106/208 palabras de
   referencia); a 1600, 207/208. Con manga japonés NO está medido.
-- **Limitación principal:** trocea los globos (las líneas del modelo son más ajustadas y no cumplen la regla de agrupación) y un bloque de una
-  sola línea no encuentra su globo. Siguiente paso: agrupar por globo. Ver los fallos esperados en `engine/tests/test_manga_det.py`.
-- **Veredicto:** más rápido y más ligero, pero hoy **no** sustituye al predeterminado. Falta además manga/manhwa real (ja/ko, vertical, SFX).
+- **Limitación (fase 1):** trocea los globos (las líneas del modelo son más ajustadas y no cumplen la regla de agrupación) y un bloque de una
+  sola línea no encuentra su globo.
+- **Veredicto (fase 1):** más rápido y más ligero, pero **no** sustituye al predeterminado.
+
+### Fase 2 (2026-11-09): agrupación por globo y filtro de ruido — detalle en EVALUACION-CORPUS-USM §11.3
+
+| | Fase 1 | Fase 2 | Por defecto |
+|---|---|---|---|
+| Regiones / fragmentos ≤ 3 caracteres | 637 / 173 | **544 / 129** | 428 / — |
+| Sin lectura del OCR (solo visión) | 27 | **20** | 1 |
+| Cajas de rotulado solapadas | 127 | **33** | 22 |
+| Cobertura del indicador | 85,5 % | **85,8 %** | 85,8 % |
+| Detección (A/B, mediana) | 3,3× más rápido | **1,24× más rápido** (la agrupación cuesta) | — |
+| Pico de RAM, pipeline completo | — | **942 MB** | 1 308 MB |
+| Pipeline completo: OCR sospechoso / original conservado / páginas con error | — | 74 / 21 / 1 | 7 / 1 / 0 |
+| Paridad Python ↔ TypeScript | 1 606/1 607 | **1 576/1 576 líneas, 544/544 bloques** | — |
+
+**Veredicto (fase 2):** menos fragmentado y con la misma cobertura que el predeterminado, pero con traducción sigue dando más OCR
+sospechoso y más texto sin traducción segura, y casi no queda ventaja de velocidad. **Sigue desactivado por defecto.** Falta además
+manga/manhwa real (ja/ko, vertical, onomatopeyas), que es para lo que se entrenó el modelo.
 
 ## 4. Qué falta para plantear cambiar el predeterminado (PENDIENTE)
 

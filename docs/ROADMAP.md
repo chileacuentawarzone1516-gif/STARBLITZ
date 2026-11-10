@@ -41,6 +41,9 @@ Detalle y estado por etapa en [MOTOR-AUDITORIA](MOTOR-AUDITORIA.md), [MODELOS-IN
 | Detector ligero PP-OCRv6 Manga (**experimental**, desactivado por defecto) | 🧪 integrado detrás de un ajuste y comparado con un capítulo real en PC ([DETECTOR-EXPERIMENTAL](DETECTOR-EXPERIMENTAL.md)); ⏳ manga/manhwa reales (ja/ko) |
 | Escritorio en CPU: números desnormalizados en el detector por defecto | ✅ corregido (salida idéntica bit a bit, ~100× más rápido en CPU; ver [EVALUACION-CORPUS-USM](EVALUACION-CORPUS-USM.md)) |
 | PLaMo 3 Translate | retirado del código (D3: no autorizado) |
+| Calidad de traducción: eco, desalineación, invención, es-419, nombres, una llamada de reparación | 🧪 implementado (PC y móvil, con paridad) y medido con el capítulo real ([EVALUACION-CORPUS-USM](EVALUACION-CORPUS-USM.md) §11) |
+| Rotulado: globos ajustados, cajas sin solapes, letra mínima relativa, tipografía condensada, original restaurado si no cabe | 🧪 implementado y medido (146 → 51 textos que no caben; 77 → 21 solapes) |
+| Alternativa cuando el modelo devuelve JSON inválido dos veces (hoy la página entera falla y conserva el original) | ⏳ |
 | Segundo plano en Android (servicio en primer plano) | ⏳ diseño (no implementado) |
 | Estilo visual del texto | ⏳ diseño |
 | Actualizador integrado | 🧪 comparación de versiones y validación del manifiesto; ⏳ descarga e instalación (decisiones pendientes) |

@@ -42,17 +42,91 @@ def text_ring_stats(img_bgr: np.ndarray, text_mask: np.ndarray, bbox) -> tuple[n
     return median, spread
 
 
-def find_bubble(img_bgr: np.ndarray, text_mask: np.ndarray, block: DetectedBlock) -> BubbleInfo | None:
+PAPER_MIN_PIXELS = 30
+PAPER_MAX_SPREAD = 22.0
+
+
+def paper_stats(img_bgr: np.ndarray, text_mask: np.ndarray, bbox) -> tuple[np.ndarray, float] | None:
+    """Color del «papel» que se ve ENTRE las letras, dentro del propio bloque (sin los trazos ni su borde).
+
+    Es el fondo real sobre el que está escrito el texto. El anillo exterior de `text_ring_stats` falla con los globos
+    ajustados al texto (cómic occidental): cruza el contorno del globo y mide el dibujo de alrededor (medido el
+    2026-11-09: un globo blanco daba fondo verde con dispersión 108 y el «globo» encontrado era la silueta del texto).
+    """
+    x1, y1, x2, y2 = bbox
+    sub = text_mask[y1:y2, x1:x2]
+    if sub.size == 0:
+        return None
+    dil = cv2.dilate(sub, np.ones((3, 3), np.uint8), iterations=1)
+    pixels = img_bgr[y1:y2, x1:x2][dil == 0]
+    if len(pixels) < PAPER_MIN_PIXELS:
+        return None
+    median = np.median(pixels, axis=0)
+    return median, float(np.mean(np.abs(pixels.astype(np.float32) - median)))
+
+
+def bubble_background(img_bgr: np.ndarray, text_mask: np.ndarray, bbox) -> tuple[np.ndarray, float]:
+    """Fondo para buscar el globo: el papel entre letras si es liso; si no, el anillo alrededor del texto."""
+    paper = paper_stats(img_bgr, text_mask, bbox)
+    if paper is not None and paper[1] < PAPER_MAX_SPREAD:
+        return paper
+    return text_ring_stats(img_bgr, text_mask, bbox)
+
+
+# Búsqueda AMPLIADA: un globo grande con poco texto (una línea, o estilo manga) mide más de 6× su bloque y la búsqueda normal lo
+# descarta. Se usa para agrupar líneas sueltas (detector experimental) y, en el pipeline, como segundo intento EXCLUSIVO: solo se
+# acepta si el globo no contiene el texto de ninguna otra región (así nunca se toma una viñeta entera con varios textos).
+WIDE_WINDOW = 4.0
+WIDE_MAX_AREA = 40.0
+WIDE_MIN_MARGIN = 2.5  # × el lado mayor del bloque: una línea ancha y baja necesita una ventana alta para ver su globo
+GROUP_MIN_MARGIN = 1.0  # al agrupar líneas del detector experimental basta 1× (misma agrupación en el corpus, 38 % más rápido)
+
+
+def point_in_polygon(x: float, y: float, polygon) -> bool:
+    """Regla par-impar (la misma cuenta en TypeScript)."""
+    inside = False
+    n = len(polygon)
+    for i in range(n):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % n]
+        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+            inside = not inside
+    return inside
+
+
+def find_bubble_wide(img_bgr: np.ndarray, text_mask: np.ndarray, block: DetectedBlock, margin: float = WIDE_MIN_MARGIN
+                     ) -> BubbleInfo | None:
+    x1, y1, x2, y2 = block.bbox
+    return find_bubble(img_bgr, text_mask, block, window=WIDE_WINDOW, max_area_ratio=WIDE_MAX_AREA,
+                       min_margin=int(margin * max(x2 - x1, y2 - y1)))
+
+
+def find_bubble_exclusive(img_bgr: np.ndarray, text_mask: np.ndarray, block: DetectedBlock,
+                          others: list[tuple[float, float]]) -> BubbleInfo | None:
+    """Globo del bloque: búsqueda normal y, si falla, la ampliada siempre que no contenga el centro de otro texto."""
+    bubble = find_bubble(img_bgr, text_mask, block)
+    if bubble is not None:
+        return bubble
+    wide = find_bubble_wide(img_bgr, text_mask, block)
+    if wide is not None and not any(point_in_polygon(cx, cy, wide.polygon) for cx, cy in others):
+        return wide
+    return None
+
+
+def find_bubble(img_bgr: np.ndarray, text_mask: np.ndarray, block: DetectedBlock, *, window: float = 1.6,
+                max_area_ratio: float = 6.0, min_margin: int = 0) -> BubbleInfo | None:
+    """Globo que contiene el bloque. `window` y `max_area_ratio` (búsqueda y tamaño máximo respecto al bloque) solo se amplían para
+    agrupar líneas sueltas de un mismo globo (detector experimental); el pipeline usa los valores por defecto."""
     h, w = img_bgr.shape[:2]
     x1, y1, x2, y2 = block.bbox
     bw, bh = x2 - x1, y2 - y1
     if bw < 4 or bh < 4:
         return None
-    bg, spread = text_ring_stats(img_bgr, text_mask, block.bbox)
+    bg, spread = bubble_background(img_bgr, text_mask, block.bbox)
     uniform = spread < 12.0
 
     # Ventana de búsqueda acotada: un globo rara vez supera ~3x el bloque de texto.
-    mx, my = int(bw * 1.6) + 20, int(bh * 1.6) + 20
+    mx, my = max(int(bw * window) + 20, min_margin), max(int(bh * window) + 20, min_margin)
     wx1, wy1, wx2, wy2 = max(0, x1 - mx), max(0, y1 - my), min(w, x2 + mx), min(h, y2 + my)
     win = img_bgr[wy1:wy2, wx1:wx2].astype(np.int16)
     tol = 38 if uniform else 26
@@ -84,7 +158,7 @@ def find_bubble(img_bgr: np.ndarray, text_mask: np.ndarray, block: DetectedBlock
     ):
         if edge_hit and not page_edge:
             return None
-    if area > 6 * bw * bh:
+    if area > max_area_ratio * bw * bh:
         return None
 
     comp = (labels == label).astype(np.uint8) * 255

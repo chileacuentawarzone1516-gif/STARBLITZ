@@ -7,7 +7,7 @@
  * - Equilibrado de líneas: evita una última línea con una sola palabra.
  * - Partición silábica básica del español solo cuando una palabra no cabe.
  */
-import type { Align, BBox } from '../types';
+import type { Align, BBox, FontRole } from '../types';
 
 export type Measure = (text: string, fontSize: number) => number;
 
@@ -22,6 +22,11 @@ export interface LayoutInput {
   align: Align;
   uppercase?: boolean;
   padding?: number; // margen interior en proporción del cuerpo de letra
+  /**
+   * ¿Se aplica también el margen a los bordes de la caja? Con globo, la caja ya está metida dentro del globo y el margen se aplica
+   * al contorno: repetirlo en la caja la encogía por debajo del texto original en los globos ajustados (cómic occidental).
+   */
+  padBox?: boolean;
 }
 
 export interface LaidLine {
@@ -38,6 +43,8 @@ export interface LayoutResult {
   lines: LaidLine[];
   fits: boolean;
   anchor: Align;
+  /** Papel tipográfico con el que se maquetó, si no es el de la región (alternativa condensada cuando el texto no cabía). */
+  font?: FontRole;
 }
 
 /** Intervalo horizontal disponible del polígono a la altura `y`. */
@@ -97,8 +104,9 @@ function slots(input: LayoutInput, size: number, count: number): Slot[] {
   for (let i = 0; i < count; i++) {
     const lineTop = top + i * lh;
     const mid = lineTop + lh / 2;
-    let left = x1 + pad;
-    let right = x2 - pad;
+    const boxPad = input.padBox === false ? 0 : pad;
+    let left = x1 + boxPad;
+    let right = x2 - boxPad;
     if (input.polygon && input.polygon.length >= 3) {
       // Se usa el tramo más estrecho entre la parte alta y baja de la línea.
       const a = polygonSpan(input.polygon, lineTop + lh * 0.15);

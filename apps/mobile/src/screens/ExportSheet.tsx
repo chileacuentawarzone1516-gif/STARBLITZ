@@ -21,6 +21,7 @@ export function ExportSheet({ project, pages }: { project: Project; pages: Page[
       const files = await exportPages(pages, {
         format, imageFormat: 'jpg', quality: 0.92, baseName: project.name,
         loadBase: async (p) => (await pageBitmap(project.id, p, 'base'))!,
+        loadOriginal: (p) => pageBitmap(project.id, p, 'original'),
         onProgress: (d, t) => setProgress(d / t),
       });
       const saved = await saveExports(files, { share: true });

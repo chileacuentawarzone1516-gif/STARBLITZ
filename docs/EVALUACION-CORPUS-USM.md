@@ -11,6 +11,9 @@ con la salida guardada) · **PENDIENTE** · **NO VERIFICADO** · **ESTIMACIÓN**
 > (4) Tiempos de **este PC** (i7-13620H, 16 hilos, 32 GB; visión en CPU con ONNX Runtime 1.31; Qwen3.5-4B en la RTX 4060 con
 > `llama-server` b12017 Vulkan). **No representan al Redmi Note 8 Pro.**
 
+> **Dos versiones.** §3–§10 describen la **línea base** (commit `42cde69`) y se conservan tal cual. §11 describe la **fase 2** (causas
+> generales corregidas) y compara antes/después con el mismo capítulo, los mismos ajustes y el mismo modelo.
+
 ## 1. Corpus e integridad del original
 
 | Dato | Valor |
@@ -179,6 +182,92 @@ Sin verdad de terreno no se da un porcentaje de acierto. Observado en la salida 
 5. Comprobar la hipótesis de limitación de CPU de Windows en segundo plano y, si se confirma, pedir al sistema que no limite el motor.
 6. OCR inglés: probar el reconocedor `manga_rec` de PP-OCRv6 u otro entrenado con rotulación de cómic (las confusiones C/O, L/I son el
    origen de varios errores de traducción).
+
+## 11. Fase 2 (2026-11-09): causas generales y antes/después — CONFIRMADO
+
+Mismo capítulo (46 páginas), mismos ajustes (perfil `mid`, reconstrucción `fast`, CPU para visión) y mismo modelo (Qwen3.5-4B en la GPU).
+Se buscaron **causas generales**, no arreglos por página; cada una tiene pruebas automáticas y, cuando afecta a los dos motores, la misma
+lógica en Python y TypeScript (casos de paridad).
+
+### 11.1 Causas encontradas y corregidas
+
+| Problema observado | Causa general | Corrección |
+|---|---|---|
+| El «globo» era la silueta del texto; la traducción no podía usar el globo | El color de fondo se medía en un anillo exterior que, en globos ajustados al texto, cae sobre el dibujo | Fondo = papel visible **entre las letras** del propio bloque; el anillo, solo como respaldo |
+| Globos grandes con poco texto sin asociar | La búsqueda descarta globos de más de 6× el bloque | Segundo intento con búsqueda ampliada, aceptado **solo si no contiene el texto de otra región** |
+| Traducciones superpuestas | Las cajas de rotulado de globos pegados se pisaban | Corte por la línea media entre los textos originales; nunca por debajo del texto original |
+| 36 % de textos que no cabían, exportados desbordados | Letra mínima fija (0,8 % de la página) mayor que el rotulado condensado original; margen interior aplicado dos veces | Mínimo hasta el 75 % del cuerpo original (suelo 0,5 % de la página), tipografía condensada de reserva, margen solo contra el contorno del globo; al exportar, lo que no cabe se deja con el **original restaurado** |
+| `too_long` en 7 de cada 10 textos | La estimación de caracteres suponía una letra más grande que la mínima del maquetador | Misma letra mínima en la estimación |
+| Traducciones desplazadas o inventadas (pág. 17: el modelo tradujo la página siguiente) | Las respuestas se asignaban solo por número, sin comprobar nada | Eco `src_start` + comprobaciones (desalineación, invención, «vosotros» en es-419, nombres propios) + **una** llamada de reparación; si sigue mal, no se usa y se conserva el original |
+| Mayúsculas al azar | Dependía del modelo | Se copia el uso de mayúsculas del original |
+| Nombres traducidos, género, es-419 | Instrucciones insuficientes | Instrucciones explícitas (nombres propios sin traducir, concordancia de género, sin «vosotros»), con ejemplos genéricos |
+
+### 11.2 Pipeline completo con el detector por defecto (46 páginas) — antes → después
+
+| Métrica | Línea base | Fase 2 |
+|---|---|---|
+| Páginas con error | 0 | 0 |
+| Textos **en revisión** / traducidos sin marcas | 323 / 105 | **95 / 333** |
+| Marca `too_long` | 296 | **67** |
+| Sin traducción (`untranslated`) | 13 | **0** |
+| Original conservado en el dibujo (`original_kept`) | 14 | **1** |
+| «vosotros» en la salida final (es-419) | 1 | 1 (detectado y **marcado para revisión**: la reparación no lo corrigió) |
+| Traducciones con mayúsculas distintas del original | 316 | **0** |
+| Pares de cajas de rotulado solapadas | 77 | **21** (quedan los de textos que ya se solapan en el original) |
+| Límite de caracteres (mediana) | 12 | 27 |
+| Globos mayores que su texto (globo real) | 189 | 205 |
+| **Textos que no caben** al exportar | 146 (dibujados desbordados) | **51** (exportados con el **original restaurado**) |
+| Textos rotulados | 405 (incl. 146 desbordados) | 367, todos dentro de su caja |
+| Llamadas de reparación | — | ≈ 2 páginas de 41 (ESTIMACIÓN a partir del registro de `llama-server`) |
+| Traducción (mediana por página) | 21,1 s | 22,3 s |
+| Pico de RAM del motor | 1 303 MB | 1 308 MB |
+
+Los **tiempos totales no son comparables** entre ejecuciones (el equipo cambió de régimen de velocidad: la detección de la línea base corrió
+en el régimen lento, 5,4 s, y la nueva en el rápido, 0,86 s); la comparación de detectores usa el A/B intercalado (§11.3).
+
+**Calidad de traducción (revisión de Claude, no humana):** desaparecen las traducciones desplazadas e inventadas de la pág. 17 (ahora cada
+globo lleva la suya) y los cambios de nombres en las páginas revisadas; las mayúsculas son coherentes. **Persisten** los errores de
+comprensión del modelo de 4B: concordancia de género («¿TE VA A DEJAR A LA NIÑA SOLO?»), modismos («¡SOY UN MONSTRUO EN CASA!» por
+*I'm in the doghouse*), palabras inventadas («CUENTARTE») y errores heredados del OCR («HE PARKER HOME» → «PETER PARKER ESTÁ EN CASA»).
+Eso ya no es estructural: depende del modelo y del OCR.
+
+**Visual:** comparativas original / antes / después en `_evaluacion/2026-11-09-usm-cap01/fase2/comparativas/` (págs. 9, 12, 17, 19, 27 y 45
+del PDF) y las 46 páginas nuevas en `…/fase2/traducidas/`. Solo en el equipo del titular.
+
+### 11.3 Detector experimental (PP-OCRv6 Manga) — antes → después
+
+| Métrica (46 páginas) | Fase 1 (1600 px) | Fase 2 | Detector por defecto (fase 2) |
+|---|---|---|---|
+| Regiones | 637 | **544** | 428 |
+| Fragmentos de ≤ 3 caracteres | 173 | **129** | — |
+| Regiones sin lectura del OCR (solo visión) | 27 | **20** | 1 |
+| Pares de cajas de rotulado solapadas | 127 | **33** | 22 |
+| Cobertura de la capa de texto del PDF (indicador) | 85,5 % | **85,8 %** | 85,8 % |
+| Paridad Python ↔ TypeScript | 1 606/1 607 líneas | **1 576/1 576** líneas, 544/544 bloques (±1 en 2 páginas), máscara IoU 0,9999 | — |
+| Memoria WebAssembly en el motor móvil (46 páginas seguidas) | — | **plana** (OpenCV.js 128 MB, JS ≈ 37 MB) | — |
+| Detección, A/B intercalado (mediana) | 1,63 s frente a 5,37 s (**3,3×**) | 1,07 s frente a 1,30 s (**1,24×**) | — |
+| Pico de RAM del motor, pipeline completo | — | **942 MB** | 1 308 MB |
+| Pipeline completo: páginas con error | — | **1** (JSON inválido del modelo tras el reintento; el capítulo siguió y la página conservó el original) | 0 |
+| Pipeline completo: textos en revisión / OCR sospechoso / sin lectura / original conservado | — | 143 / 74 / 20 / 21 | 95 / 7 / 1 / 1 |
+| Textos que no caben al exportar | — | 37 | 51 |
+
+- La **agrupación por globo** une las líneas sueltas de un mismo globo y el **filtro de ruido** quita líneas diminutas fuera de globo;
+  ambas reducen la fragmentación, pero **cuestan tiempo**: la ventaja de velocidad baja de 3,3× a 1,24×. Una segmentación de toda la
+  página por color de papel se probó y se descartó (igual de lenta y peor agrupación).
+- Con traducción, el texto más troceado da **más OCR sospechoso** y más regiones sin traducción segura. **Veredicto: sigue
+  desactivado por defecto**; no supera al detector por defecto en calidad.
+- Incidencia **no reproducida**: en una primera pasada de paridad, Edge cerró la página tras 25 de 46 (el equipo estaba ejecutando a
+  la vez el pipeline completo). Al repetirla, las 46 páginas pasaron con la memoria plana.
+
+### 11.4 Lo que queda (PENDIENTE)
+
+1. Errores de comprensión del modelo de 4B (género, modismos, palabras inventadas): probar un modelo mayor en el PC (Qwen 9B) y
+   evaluación humana.
+2. 51 textos (12 %) no caben ni con letra condensada y se exportan con el original: revisar el ajuste de globos muy estrechos y la
+   reescritura más corta por parte del modelo.
+3. Una respuesta JSON inválida tras el reintento hace fallar la página entera: falta una alternativa (p. ej. traducir esa página por
+   textos sueltos o en texto plano).
+4. Manga y manhwa reales (japonés vertical, coreano) para valorar el detector experimental donde importa.
 
 ## Anexo A. Tabla por página
 

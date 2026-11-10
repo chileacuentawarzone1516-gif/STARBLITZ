@@ -22,6 +22,11 @@ export interface ExportOptions {
   baseName: string;
   /** Imagen base de cada página: limpia si existe, si no la original. */
   loadBase: (page: Page) => Promise<ImageBitmap | HTMLImageElement>;
+  /**
+   * Imagen ORIGINAL de la página (opcional). Con ella, una traducción que no cabe ni con la letra mínima se exporta con el texto
+   * original restaurado en vez de desbordada (ver `RenderOptions.original`).
+   */
+  loadOriginal?: (page: Page) => Promise<ImageBitmap | HTMLImageElement | null>;
   onProgress?: (done: number, total: number) => void;
   signal?: AbortSignal;
 }
@@ -33,7 +38,8 @@ export function safeFileName(name: string): string {
   return (cleaned || 'starblitz').slice(0, 80);
 }
 
-export async function renderPageBlob(page: Page, base: CanvasImageSource, format: ImageFormat, quality = 0.92): Promise<Blob> {
+export async function renderPageBlob(page: Page, base: CanvasImageSource, format: ImageFormat, quality = 0.92,
+  original?: CanvasImageSource | null): Promise<Blob> {
   const canvas = typeof OffscreenCanvas !== 'undefined'
     ? new OffscreenCanvas(page.width, page.height)
     : Object.assign(document.createElement('canvas'), { width: page.width, height: page.height });
@@ -43,7 +49,7 @@ export async function renderPageBlob(page: Page, base: CanvasImageSource, format
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, page.width, page.height);
   }
-  renderPage(ctx, base, page);
+  renderPage(ctx, base, page, original ? { original } : {});
   if (canvas instanceof HTMLCanvasElement) {
     return new Promise((resolve, reject) => canvas.toBlob(
       (b) => (b ? resolve(b) : reject(new Error('No se pudo codificar la página'))), MIME[format], quality));
@@ -62,7 +68,8 @@ export async function exportPages(pages: Page[], opts: ExportOptions): Promise<E
     if (opts.signal?.aborted) throw new DOMException('Exportación cancelada', 'AbortError');
     const page = pages[i];
     const img = await opts.loadBase(page);
-    const blob = await renderPageBlob(page, img, imgFormat, quality);
+    const original = page.has_clean && opts.loadOriginal ? await opts.loadOriginal(page) : null;
+    const blob = await renderPageBlob(page, img, imgFormat, quality, original);
     if ('close' in img && typeof img.close === 'function') img.close();
     rendered.push({ name: `${String(i + 1).padStart(pad, '0')}.${imgFormat}`, blob, page });
     opts.onProgress?.(i + 1, pages.length + (opts.format === 'pdf' || opts.format === 'zip' ? 1 : 0));
