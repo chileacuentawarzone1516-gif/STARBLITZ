@@ -18,7 +18,7 @@ class Recorder(LLMClient):
         super().__init__(LLMSettings())
         self.response, self.calls = response, []
 
-    def _chat(self, messages, schema, *, model, temperature, cancel=None):
+    def _chat(self, messages, schema, *, model, temperature, cancel=None, max_tokens=None):
         self.calls.append(messages)
         return self.response
 

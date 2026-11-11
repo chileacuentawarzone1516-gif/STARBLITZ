@@ -239,6 +239,21 @@ describe('idioma, modelo y rechazos', () => {
     expect((await env.store.get(project.id)).last_job).toMatchObject({ refused: 1 });
   });
 
+  it('una respuesta JSON rota no detiene el capítulo: la página se recupera texto a texto', async () => {
+    const env = makeEnv(BOOK);
+    env.llm.brokenPages = new Set([2]);
+    const project = await seedProject(env, KEYS);
+    const job = await waitJob(env, startRun(env, project.id).id);
+    expect(job.status).toBe('done'); // antes: LLMUnavailableError y el capítulo entero se detenía
+    const pages = await pagesOf(env, project);
+    expect(pages[1].status).not.toBe('error');
+    expect(pages[1].regions.every((r) => r.translation.startsWith('ES('))).toBe(true);
+    expect(env.llm.calls.some((c) => c.user.includes('TRADUCE SOLO ESTE TEXTO'))).toBe(true);
+    const last = (await env.store.get(project.id)).last_job as Record<string, number>;
+    expect(last).toMatchObject({ json_invalid: 1, json_salvaged: 0, json_lost: 0, errors: 0 });
+    expect(last.json_recovered).toBe(pages[1].regions.length);
+  });
+
   it('sin modelo instalado la tarea falla con una indicación clara y no estropea las páginas', async () => {
     const env = makeEnv(BOOK);
     env.library.models = [];

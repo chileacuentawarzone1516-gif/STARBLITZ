@@ -90,6 +90,63 @@ no una nota de calidad literaria.
 Medida en PC (RSS del proceso `llama-server`, pico): 0,8B ≈ 0,8–1,0 GB; 1,8–2B ≈ 1,8–2,2 GB; 4B ≈ 3,3 GB. En el Redmi (6–8 GB, ~3,5–5 GB
 útiles para la app tras el sistema) caben PLaMo-0.8B y Hy-MT2-1.8B con holgura; el 4B queda justo. **Sin medir en el teléfono.**
 
+## Modelos mayores que Qwen3.5-4B en el PC (RTX 4060 Laptop, 8 GB) — 2026-11-10
+
+**Mismo corpus y mismas condiciones para todos:** las 427 regiones ya analizadas del capítulo real (*Ultimate Spider-Man* n.º 1,
+46 páginas, inglés → es-419; ver [EVALUACION-CORPUS-USM](EVALUACION-CORPUS-USM.md)), el **traductor real del motor**
+(`ContextualTranslator`, con contexto entre páginas, reparación, recuperación ante JSON inválido y reformulación breve), sin imagen,
+`llama-server` b12017 Vulkan lanzado **como lo lanza la app** (`-c 12288 --parallel 1 -ngl 99 --jinja --reasoning-budget 0`).
+Herramientas: `tools/bench/translate_models.py` y `tools/bench/translate_compare.py`. Archivos GGUF de los repositorios del catálogo,
+SHA-256 comprobado contra Hugging Face; **licencia declarada Apache-2.0 en los cuatro** (ficha del repositorio, comprobada el 2026-11-10).
+
+| Métrica (427 textos) | Qwen3.5-4B Q4_K_M (actual) | Qwen3.5-9B Q4_K_M | **Gemma 4 E4B QAT Q4_0** | Gemma 4 12B QAT Q4_0 |
+|---|---|---|---|---|
+| Páginas con error | 0 | 0 | 0 | 0 |
+| Sin traducir / en revisión | 1 / 44 | 0 / 39 | **0 / 22** | 0 / 24 |
+| JSON inválido (cortes por tope) → rescatados / recuperados / perdidos | 3 → 11 / 30 / 0 | 1 → 0 / 16 / 0 | **0** | 0 |
+| Tiempo del capítulo (solo traducción) | 21,4 min | 33,2 min | **19,4 min** | 90,9 min (con desalojo de VRAM, ver nota) |
+| Mediana por página | 23,1 s | 45,0 s | 25,4 s | 78,3 s |
+| Generación | 48,7 tok/s | 33,4 tok/s | 45,9 tok/s | 19–27 tok/s con el modelo entero en la GPU; ≈ 4 tras el desalojo (media 8,4) |
+| VRAM pico (toda la GPU) | 3,4 GB | 5,7 GB | **3,3 GB** | 7,9 GB (de 8,0) |
+| RSS pico de `llama-server`* | 11,4 GB | 13,7 GB | 7,9 GB | 17,4 GB |
+| Muestra aleatoria de 30 textos: traducciones con error de sentido o forma (revisión de Claude) | ≈ 13 | ≈ 9–10 | **≈ 3–4** | ≈ 2–4 |
+| Regionalismos de España no pedidos (revisión manual) | «JODER» por *whoa* | «TÍOS» ×3, «¿QUÉ COÑO…?» (inventado) | «TÍO» por *yo, man* | ninguno visto |
+
+\* RSS que informa Windows: incluye memoria mapeada del archivo y compartida con la GPU; no es RAM exclusiva.
+
+**Frases con errores ya documentados** (revisión de Claude, **no humana ni nativa**):
+
+| Original | Qwen3.5-4B | Qwen3.5-9B | Gemma 4 E4B |
+|---|---|---|---|
+| ARE YOU SWEET ON HIM, HARRY? (Harry es varón) | ¿ESTÁS ENAMORADA DE ÉL? ❌ | ¿TE GUSTAS DE ÉL? ❌ | ¿TE GUSTA ÉL, HARRY? ✅ |
+| NO, I'M SWEET ON YOU. (habla un chico) | ESTOY ENAMORADA DE TI ❌ | ME GUSTAS A TI ✅ | ME SIENTO ATRAÍDO POR TI ✅ |
+| I'M HUGE IN THE DOGHOUSE AT HOME | SOY GRANDE EN EL JARDÍN ❌ | ESTOY EN LA PEOR SITUACIÓN EN CASA ≈ | ESTOY MUY MAL EN CASA ≈ |
+| DON'T YOU LOOK LIKE A MILLION DOLLARS | literal ❌ | literal ❌ | literal ❌ |
+| WILL YOU LEAVE THE KID ALONE? | ¿QUIERES QUE DEJES A ESE CHICO SOLO? ❌ | ¿VAS A DEJAR AL NIÑO EN PAZ? ✅ | ¿VAS A DEJAR AL NIÑO EN PAZ? ✅ |
+| P.S. 163 QUEENS DISTRICT | DISTRICT DE QUES ❌ | DISTRITO DE QUEENS ✅ | DISTRITO DE QUEENS ✅ |
+| WHY ISN'T MARY JANE SITTING OVER HERE? | ✅ | NO ESTÁ SIENDO AQUÍ ❌ | ✅ |
+| OH FORGET ABOUT THEM, ROLL IT OFF | ¡OLVÍDELOS! ¡DALE! ≈ | OLVIDA CON ELLOS ❌ | OLVÍDATE DE ELLOS, DÉJALO PASAR ✅ |
+| JERKHOLE TEAM MATES (insulto) | JODIDOS COMPAÑEROS ✅ | TÍOS DE TU EQUIO ❌ | IDIOTAS DE TU EQUIPO ≈ (suavizado leve) |
+| YOU COULDA FOOLED ME | literal ❌ | ME HABRÍAS MENTIDO ❌ | literal ❌ |
+| POWERLESS (título) | POWERLESS ≈ | ¡IMPOTENTE! ❌ | SIN PODER ✅ |
+
+**Gemma 4 12B en las mismas frases:** acierta *doghouse* («ESTOY EN GRAVES PROBLEMAS EN CASA»), *million dollars* («¿NO TE VES DE MARAVILLA?», con el sentido), *coulda fooled me* («CASI ME ENGAÑAS»), *wigged out* («ME DIO UN ATAQUE DE PÁNICO… ¡ERA ENORME!») y *Powerless* («SIN PODER»); erratas sueltas («OLVÍDATES»). Es el que mejor entiende los modismos de este corpus, pero ver el coste abajo.
+
+**Conclusiones (PC, este corpus, revisión no humana):**
+- **Gemma 4 E4B** es la mejor relación calidad/coste medida: menos errores de comprensión, género y gramática que los dos Qwen,
+  la más rápida del grupo y la que menos memoria usa; 0 respuestas JSON inválidas. Sigue fallando modismos idiomáticos
+  (*million dollars*, *coulda fooled me*) y algún regionalismo.
+- **Qwen3.5-9B** mejora algunos sentidos frente al 4B, pero introduce errores nuevos (gramática, erratas, españolismos y hasta un
+  taco inventado) y es 1,55× más lento con 2,3 GB más de VRAM: **no compensa**.
+- **Gemma 4 12B** es el que mejor resuelve los modismos y su calidad general es parecida a la de Gemma E4B, pero ocupa la GPU
+  entera (7,9 GB de 8,0): durante la ejecución completa Windows desalojó parte del modelo a memoria compartida y la generación cayó de
+  19–27 a ≈ 4 tok/s (capítulo en 91 min frente a 19 min de E4B). Aun a plena velocidad es ~2× más lento que E4B. En esta GPU
+  **no es utilizable de forma fiable**; tendría sentido con ≥ 10–12 GB de VRAM.
+- **Decisión (no tomada aquí):** el titular pidió no cambiar el modelo predeterminado ni retirar Qwen/Gemma. La recomendación con datos
+  es **proponer Gemma 4 E4B como modelo recomendado para PC con GPU** tras una evaluación humana nativa sobre más corpus (manga y
+  manhwa reales, otros géneros). Qwen3.5-4B sigue siendo el predeterminado (y el del móvil, donde Gemma E4B pesa 5,2 GB en disco
+  y no se ha medido).
+
 ## Protocolo de comparación
 
 Reproducible y **sin páginas con derechos de autor en el repositorio**:

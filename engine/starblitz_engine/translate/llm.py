@@ -51,23 +51,42 @@ class ModelInfo:
     quantization: str = ""
 
 
+class InvalidJSONError(ValueError):
+    """El modelo no devolvió JSON válido ni tras el reintento.
+
+    Guarda las respuestas en bruto para rescatar lo aprovechable (`salvage_items`) y si alguna se cortó por el tope de tokens.
+    Antes era un `ValueError` genérico: en el PC la página entera fallaba y en el móvil se detenía TODO el capítulo."""
+
+    def __init__(self, raws: list[str], truncated: bool):
+        super().__init__("El modelo no devolvió una respuesta JSON válida.")
+        self.raws = raws
+        self.truncated = truncated
+
+
 class LLMClient:
     """Interfaz común: chat con respuesta JSON validada por esquema."""
 
     def __init__(self, settings: LLMSettings):
         self.s = settings
         self._capabilities: dict[str, ModelInfo] = {}
+        # Motivo de fin de la última respuesta: «length» = cortada por el tope de tokens (p. ej. un bucle de repetición).
+        self.last_finish = ""
 
     # -- API pública ------------------------------------------------------
     def chat_json(self, messages: list[ChatMessage], schema: dict, *, model: str, temperature: float | None = None,
-                  cancel: threading.Event | None = None) -> dict:
+                  cancel: threading.Event | None = None, max_tokens: int | None = None) -> dict:
         if cancel and cancel.is_set():
             raise CancelledError()
+        self.last_finish = ""
         raw = self._chat(messages, schema, model=model, temperature=self.s.temperature if temperature is None else temperature,
-                         cancel=cancel)
+                         cancel=cancel, max_tokens=max_tokens)
         try:
             return parse_json(raw)
         except ValueError:
+            if self.last_finish == "length":
+                # Cortada por el tope: pedir lo mismo vuelve a cortarse y cuesta otra respuesta entera. Se rescata lo completo.
+                log.warning("Respuesta JSON cortada por el tope de tokens; se rescata lo aprovechable.")
+                raise InvalidJSONError([raw], True) from None
             log.warning("Respuesta JSON inválida; se reintenta con instrucciones de reparación.")
             if cancel and cancel.is_set():
                 raise CancelledError()
@@ -75,7 +94,12 @@ class LLMClient:
                 ChatMessage("assistant", raw[:4000]),
                 ChatMessage("user", "Tu respuesta no era JSON válido según el esquema. Devuelve SOLO el JSON corregido."),
             ]
-            return parse_json(self._chat(repair, schema, model=model, temperature=0.1, cancel=cancel))
+            self.last_finish = ""
+            raw2 = self._chat(repair, schema, model=model, temperature=0.1, cancel=cancel, max_tokens=max_tokens)
+            try:
+                return parse_json(raw2)
+            except ValueError:
+                raise InvalidJSONError([raw, raw2], self.last_finish == "length") from None
 
     def chat_plain(self, messages: list[ChatMessage], *, model: str, temperature: float = 0.0, max_tokens: int = 1024,
                    extra: dict | None = None, cancel: threading.Event | None = None) -> str:
@@ -95,7 +119,7 @@ class LLMClient:
         return ModelInfo(name=model)
 
     def _chat(self, messages: list[ChatMessage], schema: dict, *, model: str, temperature: float,
-              cancel: threading.Event | None = None) -> str:
+              cancel: threading.Event | None = None, max_tokens: int | None = None) -> str:
         raise NotImplementedError
 
     def _timeout(self) -> httpx.Timeout:
@@ -148,7 +172,7 @@ class OllamaClient(LLMClient):
         return info
 
     def _chat(self, messages: list[ChatMessage], schema: dict, *, model: str, temperature: float,
-              cancel: threading.Event | None = None) -> str:
+              cancel: threading.Event | None = None, max_tokens: int | None = None) -> str:
         info = self.model_info(model)
         payload: dict[str, Any] = {
             "model": model,
@@ -156,7 +180,7 @@ class OllamaClient(LLMClient):
             "format": schema,
             "keep_alive": "20m",
             "options": {"temperature": temperature, "num_ctx": self.s.context_window, "top_p": 0.9,
-                        "repeat_penalty": 1.05, "num_predict": JSON_MAX_TOKENS},
+                        "repeat_penalty": 1.05, "num_predict": max_tokens or JSON_MAX_TOKENS},
             "messages": [self._message(m, info.vision) for m in messages],
         }
         if info.thinking:
@@ -172,7 +196,9 @@ class OllamaClient(LLMClient):
         if r.status_code >= 400:
             detail = _safe_error(r)
             raise LLMUnavailableError(f"Ollama devolvió un error: {detail}")
-        return (r.json().get("message") or {}).get("content", "")
+        data = r.json()
+        self.last_finish = str(data.get("done_reason") or "")
+        return (data.get("message") or {}).get("content", "")
 
     def chat_plain(self, messages: list[ChatMessage], *, model: str, temperature: float = 0.0, max_tokens: int = 1024,
                    extra: dict | None = None, cancel: threading.Event | None = None) -> str:
@@ -228,7 +254,8 @@ class OpenAICompatibleClient(LLMClient):
             raise LLMUnavailableError("No se pudo conectar con el servidor compatible con OpenAI configurado.") from exc
         return [ModelInfo(name=m.get("id", "")) for m in r.json().get("data", [])]
 
-    def _payload(self, messages: list[ChatMessage], schema: dict, *, model: str, temperature: float) -> dict:
+    def _payload(self, messages: list[ChatMessage], schema: dict, *, model: str, temperature: float,
+                 max_tokens: int | None = None) -> dict:
         def content(m: ChatMessage):
             if not m.images or not self.s.use_vision:
                 return m.content
@@ -244,7 +271,7 @@ class OpenAICompatibleClient(LLMClient):
             "response_format": {"type": "json_schema", "json_schema": {"name": "respuesta", "schema": schema, "strict": True}},
             # Igual que el motor integrado: sin tope ni «enable_thinking=False», Qwen3.5 en un servidor externo (llama.cpp, LM Studio,
             # vLLM) razona y puede generar miles de tokens por página (medido el 2026-11-09: >8 500 en una sola llamada).
-            "max_tokens": JSON_MAX_TOKENS,
+            "max_tokens": max_tokens or JSON_MAX_TOKENS,
             "chat_template_kwargs": {"enable_thinking": False},
         }
 
@@ -264,8 +291,8 @@ class OpenAICompatibleClient(LLMClient):
         return (choices[0].get("message") or {}).get("content", "")
 
     def _chat(self, messages: list[ChatMessage], schema: dict, *, model: str, temperature: float,
-              cancel: threading.Event | None = None) -> str:
-        payload = self._payload(messages, schema, model=model, temperature=temperature)
+              cancel: threading.Event | None = None, max_tokens: int | None = None) -> str:
+        payload = self._payload(messages, schema, model=model, temperature=temperature, max_tokens=max_tokens)
         try:
             r = httpx.post(self._url("/chat/completions"), json=payload, headers=self._headers(), timeout=self._timeout())
         except httpx.HTTPError as exc:
@@ -273,6 +300,7 @@ class OpenAICompatibleClient(LLMClient):
         if r.status_code >= 400:
             raise LLMUnavailableError(f"El servidor devolvió un error: {_safe_error(r)}")
         choices = r.json().get("choices") or [{}]
+        self.last_finish = str(choices[0].get("finish_reason") or "")
         return (choices[0].get("message") or {}).get("content", "")
 
 
@@ -297,11 +325,12 @@ class BuiltinClient(OpenAICompatibleClient):
     def warm_up(self, model: str, cancel: threading.Event | None = None) -> None:
         self.runtime.ensure(model, cancel)
 
-    def _payload(self, messages: list[ChatMessage], schema: dict, *, model: str, temperature: float) -> dict:
-        payload = super()._payload(messages, schema, model=model, temperature=temperature)
+    def _payload(self, messages: list[ChatMessage], schema: dict, *, model: str, temperature: float,
+                 max_tokens: int | None = None) -> dict:
+        payload = super()._payload(messages, schema, model=model, temperature=temperature, max_tokens=max_tokens)
         payload.update({
             "stream": True, "stream_options": {"include_usage": True}, "cache_prompt": True, "top_p": 0.9,
-            "repeat_penalty": 1.05, "max_tokens": 4096,
+            "repeat_penalty": 1.05, "max_tokens": max_tokens or JSON_MAX_TOKENS,
             "chat_template_kwargs": {"enable_thinking": False},  # la traducción no necesita razonamiento largo
         })
         return payload
@@ -319,8 +348,9 @@ class BuiltinClient(OpenAICompatibleClient):
         return self._stream(payload, model, cancel)
 
     def _chat(self, messages: list[ChatMessage], schema: dict, *, model: str, temperature: float,
-              cancel: threading.Event | None = None) -> str:
-        return self._stream(self._payload(messages, schema, model=model, temperature=temperature), model, cancel)
+              cancel: threading.Event | None = None, max_tokens: int | None = None) -> str:
+        return self._stream(self._payload(messages, schema, model=model, temperature=temperature, max_tokens=max_tokens),
+                            model, cancel)
 
     def _stream(self, payload: dict, model: str, cancel: threading.Event | None) -> str:
         """Petición en streaming al `llama-server` integrado (compartida por la llamada con JSON y la de texto plano)."""
@@ -352,6 +382,8 @@ class BuiltinClient(OpenAICompatibleClient):
                             piece = (choice.get("delta") or {}).get("content")
                             if piece:
                                 parts.append(piece)
+                            if choice.get("finish_reason"):
+                                self.last_finish = str(choice["finish_reason"])
                         usage = chunk.get("usage")
                         if usage:
                             tokens = int(usage.get("completion_tokens") or tokens)
@@ -392,6 +424,66 @@ def parse_json(raw: str) -> dict:
     if not isinstance(data, dict):
         raise ValueError("el JSON no es un objeto")
     return data
+
+
+def salvage_items(raws: list[str]) -> list[dict]:
+    """Elementos COMPLETOS de la lista «items» de respuestas JSON rotas (cortadas o mal cerradas).
+
+    Recorre el texto respetando cadenas y escapes y se queda con cada objeto `{…}` del primer nivel de «items» que se pueda leer
+    entero y tenga un número entero y textos. Si un número aparece en varias respuestas, vale el de la primera. La correspondencia
+    con el original NO se da por buena aquí: quien los usa exige el eco del original (`src_start`)."""
+    out: dict[int, dict] = {}
+    for raw in raws:
+        for item in _scan_items(_FENCE_RE.sub("", _THINK_RE.sub("", raw or "").strip()).strip()):
+            n = item.get("n")
+            if isinstance(n, bool) or not isinstance(n, (int, float)) or n != int(n):
+                continue
+            if not isinstance(item.get("translation"), str) or not isinstance(item.get("src_start", ""), str):
+                continue
+            out.setdefault(int(n), item)
+    return [out[k] for k in sorted(out)]
+
+
+def _scan_items(text: str) -> list[dict]:
+    key = text.find('"items"')
+    start = text.find("[", key) if key >= 0 else -1
+    if start < 0:
+        return []
+    items: list[dict] = []
+    depth, obj_start, in_str, esc = 0, -1, False, False
+    for i in range(start + 1, len(text)):
+        c = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c == "{":
+            if depth == 0:
+                obj_start = i
+            depth += 1
+        elif c == "}" and depth > 0:
+            depth -= 1
+            if depth == 0 and obj_start >= 0:
+                try:  # sin NaN ni Infinity: JSON.parse (móvil) no los acepta y el resultado debe ser el mismo
+                    obj = json.loads(text[obj_start:i + 1], parse_constant=_reject_constant)
+                except ValueError:
+                    obj = None
+                if isinstance(obj, dict):
+                    items.append(obj)
+                obj_start = -1
+        elif c == "]" and depth == 0:
+            break
+    return items
+
+
+def _reject_constant(name: str):
+    raise ValueError(f"constante no admitida: {name}")
 
 
 def _safe_error(r: httpx.Response) -> str:

@@ -71,13 +71,43 @@ export function paperStats(cv: Cv, img: Mat, textMask: Mat, bbox: Box): { median
     if (idx.length < PAPER_MIN_PIXELS) return null;
     const data = region.data;
     const med = channelMedians(data, 3, idx);
-    let sum = 0;
-    for (const i of idx) {
-      const b = i * 3;
-      sum += Math.abs(data[b] - med[0]) + Math.abs(data[b + 1] - med[1]) + Math.abs(data[b + 2] - med[2]);
-    }
-    return { median: med, spread: sum / (idx.length * 3) };
+    return { median: med, spread: robustSpread(data, idx, med) };
   });
+}
+
+/**
+ * Dispersión robusta (port de `robust_spread`): mediana de la mayor desviación por canal respecto a la mediana. La media de las
+ * desviaciones la inflaban los píxeles de antialias de las letras (un globo blanco con texto denso daba 23 > 22).
+ * Las desviaciones son múltiplos de 0,5 (la mediana puede acabar en ,5): histograma exacto de 511 casillas, igual que `np.median`.
+ */
+export function robustSpread(data: Uint8Array | Uint8ClampedArray, idx: number[], med: number[]): number {
+  if (!idx.length) return 0;
+  const hist = new Uint32Array(511);
+  for (const i of idx) {
+    const b = i * 3;
+    const d = Math.max(Math.abs(data[b] - med[0]), Math.abs(data[b + 1] - med[1]), Math.abs(data[b + 2] - med[2]));
+    hist[Math.round(d * 2)]++;
+  }
+  const n = idx.length, lo = Math.floor((n - 1) / 2), hi = Math.floor(n / 2);
+  let seen = 0, a = -1, b = -1;
+  for (let v = 0; v < hist.length; v++) {
+    seen += hist[v];
+    if (a < 0 && seen > lo) a = v;
+    if (seen > hi) { b = v; break; }
+  }
+  return (a + b) / 4;
+}
+
+/**
+ * Luminosidad media (0–255) del fondo sobre el que se rotula (port de `text_tone`): decide si la letra va en blanco o en negro.
+ * Con el anillo exterior, en los globos llenos de texto la traducción salía en BLANCO dentro de un globo blanco.
+ * Orden: papel entre letras si es liso, color del globo, anillo.
+ */
+export function textTone(cv: Cv, img: Mat, textMask: Mat, bbox: Box, bubble: BubbleInfo | null, ring: number[]): number {
+  const paper = paperStats(cv, img, textMask, bbox);
+  if (paper && paper.spread < PAPER_MAX_SPREAD) return (paper.median[0] + paper.median[1] + paper.median[2]) / 3;
+  if (bubble) return (bubble.fill[0] + bubble.fill[1] + bubble.fill[2]) / 3;
+  return (ring[0] + ring[1] + ring[2]) / 3;
 }
 
 /** Fondo para buscar el globo: el papel entre letras si es liso; si no, el anillo alrededor del texto. */
@@ -92,6 +122,8 @@ export const WIDE_MAX_AREA = 40.0;
 export const WIDE_MIN_MARGIN = 2.5;
 /** Al agrupar líneas del detector experimental basta 1× (misma agrupación en el corpus y un 38 % más rápido). */
 export const GROUP_MIN_MARGIN = 1.0;
+/** Tras cortar la cola, el globo debe seguir cubriendo al menos este tanto del bloque de texto. */
+export const TAIL_CORE_COVER = 0.6;
 
 /** Regla par-impar (la misma cuenta que en Python). */
 export function pointInPolygon(x: number, y: number, polygon: [number, number][]): boolean {
@@ -174,8 +206,18 @@ export function findBubble(cv: Cv, img: Mat, textMask: Mat, block: DetectedBlock
     const comp = s.add(new cv.Mat(wh, ww, cv.CV_8UC1));
     const cd = comp.data;
     for (let i = 0; i < cd.length; i++) cd[i] = lab[i] === label ? 255 : 0;
-    const closed = s.add(new cv.Mat());
+    let closed = s.add(new cv.Mat());
     cv.morphologyEx(comp, closed, cv.MORPH_CLOSE, s.add(cv.Mat.ones(5, 5, cv.CV_8UC1)), new cv.Point(-1, -1), 1, cv.BORDER_CONSTANT, cv.morphologyDefaultBorderValue());
+    // La COLA del globo rompe la prueba de convexidad: una apertura del tamaño de la letra la corta, si lo que queda sigue
+    // cubriendo el bloque de texto (igual que en Python).
+    const k = Math.max(5, Math.trunc(block.lineSize * 0.9 + 0.5) | 1);
+    const opened2 = s.add(new cv.Mat());
+    cv.morphologyEx(closed, opened2, cv.MORPH_OPEN, s.add(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(k, k))),
+      new cv.Point(-1, -1), 1, cv.BORDER_CONSTANT, cv.morphologyDefaultBorderValue());
+    const od = opened2.data;
+    let cover = 0;
+    for (let y = y1 - wy1; y < y2 - wy1; y++) for (let x = x1 - wx1; x < x2 - wx1; x++) cover += od[y * ww + x];
+    if (cover / (bw * bh) > TAIL_CORE_COVER * 255) closed = opened2;
     const contours = s.add(new cv.MatVector()), hier = s.add(new cv.Mat());
     cv.findContours(closed, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
     if (contours.size() === 0) return null;
@@ -199,6 +241,9 @@ export function findBubble(cv: Cv, img: Mat, textMask: Mat, block: DetectedBlock
     const polygon: [number, number][] = [];
     for (let i = 0; i < approx.rows; i++) polygon.push([a32[2 * i] + wx1, a32[2 * i + 1] + wy1]);
     const xs = polygon.map((p) => p[0]), ys = polygon.map((p) => p[1]);
+    // El globo CONTIENE su texto; si no, no es su globo (igual que en Python).
+    const slack = Math.max(4.0, block.lineSize * 0.25);
+    if (Math.min(...xs) > x1 + slack || Math.min(...ys) > y1 + slack || Math.max(...xs) < x2 - slack || Math.max(...ys) < y2 - slack) return null;
     return {
       polygon,
       bbox: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] as Box,

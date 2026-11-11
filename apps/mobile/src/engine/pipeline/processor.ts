@@ -61,6 +61,12 @@ interface Stats {
   errors: number; model: string; seconds?: number; done_pages?: number; error_pages?: number;
   /** Textos cuyo original se CONSERVÓ (no se borró) porque no había una traducción válida o no cabía. */
   preserved: number;
+  /** Respuestas del modelo sin JSON válido, textos rescatados de ellas, recuperados uno a uno y perdidos (conservan el original). */
+  json_invalid: number; json_salvaged: number; json_recovered: number; json_lost: number;
+  /** Traducciones reformuladas más cortas porque no cabían en su globo. */
+  condensed: number;
+  /** Textos que pasaron por la llamada de reparación. */
+  repaired: number;
   /** Segundos por etapa y por página: base para localizar el cuello de botella con datos medidos. */
   timings?: TimingSummary;
 }
@@ -270,7 +276,8 @@ export class Processor {
     const totalUnits = ids.length * full;
     const preUnits = ids.reduce((n, pid) => n + full - sumWeights(todo.get(pid)!), 0);
     const progress = new Progress(ctx, run, totalUnits, preUnits, totalUnits - preUnits, this.d.guard, () => this.trim());
-    const stats: Stats = { pages: ids.length, pages_with_work: [...todo.values()].filter((t) => t.length).length, lines: 0, review: 0, refused: 0, edited_by_reviewer: 0, errors: 0, model: '', preserved: 0 };
+    const stats: Stats = { pages: ids.length, pages_with_work: [...todo.values()].filter((t) => t.length).length, lines: 0, review: 0, refused: 0, edited_by_reviewer: 0, errors: 0, model: '', preserved: 0,
+      json_invalid: 0, json_salvaged: 0, json_recovered: 0, json_lost: 0, repaired: 0, condensed: 0 };
     this.timing = new RunTiming();
     this.timing.chapter.queue_wait_s = Math.max(0, Date.now() / 1000 - ctx.job.created);
     this.useOcrCache = !force && !!this.d.caches;
@@ -470,6 +477,12 @@ export class Processor {
       stats.review += result.updated.filter((r) => r.status === 'review').length;
       stats.refused += result.updated.filter((r) => r.flags.includes('refused')).length;
       stats.edited_by_reviewer += result.reviewed;
+      stats.repaired += result.repaired ?? 0;
+      stats.json_invalid += result.jsonInvalid ?? 0;
+      stats.json_salvaged += result.salvaged ?? 0;
+      stats.json_recovered += result.recovered ?? 0;
+      stats.json_lost += result.jsonLost ?? 0;
+      stats.condensed += result.condensed ?? 0;
     } else {
       await store.mutate(projectId, async () => {
         const fresh = await store.getPage(projectId, pid);

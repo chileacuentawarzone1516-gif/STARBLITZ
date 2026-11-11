@@ -11,6 +11,35 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y 
 Primera versión del código. **No hay ninguna Release publicada**: antes de publicarla deben completarse y documentarse
 las pruebas de [docs/PRUEBAS-HARDWARE.md](docs/PRUEBAS-HARDWARE.md).
 
+### Corregido (fase 3: robustez, calidad de traducción y reconstrucción — 2026-11-10)
+
+- **Respuesta JSON inválida del modelo:** antes hacía fallar la página entera en el PC y, en el móvil, detenía **todo el capítulo**
+  (`LLMUnavailableError`). Ahora `InvalidJSONError`/`InvalidJsonError` conserva las respuestas en bruto; si la respuesta se cortó por el tope
+  de tokens no se reintenta igual (se volvería a cortar); se **rescatan** los elementos completos que traigan el eco de SU original y los que
+  faltan se piden **uno a uno** (2 intentos, tope de 512 tokens, como máximo 24 textos por página). Lo que no se recupera conserva el
+  original con una nota. Cuentas nuevas en el trabajo: `json_invalid`, `json_salvaged`, `json_recovered`, `json_lost`. Paridad Python ↔ TS.
+- **Globos llenos de texto no se reconocían (93 de 301 en el capítulo real):** la dispersión del papel entre letras se medía con la media,
+  que inflaba el antialias; ahora es robusta (mediana de la desviación máxima por canal). La cola del globo rompía la prueba de convexidad:
+  ahora se corta con una apertura del tamaño de la letra. Un globo debe **contener** su texto (si no, no es su globo).
+- **Texto rotulado en BLANCO dentro de globos blancos (14 textos ilegibles) y manchas oscuras al borrar:** el color de la letra se decidía
+  con el anillo exterior; ahora con el papel entre letras (`text_tone`/`textTone`).
+- **Traducciones basura** («¡¡¡¡¡¡») y **«vosotros» monosílabo** («veis», «sois», «vais», «dais») no se detectaban: nuevo control `garbled`
+  (bloqueante) y patrón de es-419 ampliado.
+- **Textos que no caben:** comprobación de encaje con las **métricas reales de las tipografías** (`translate/fit.py`/`fit.ts`, tablas generadas
+  por `tools/export_glyph_metrics.py`), y **reformulación breve** (una llamada por página) solo para lo que no cabe: la versión corta se
+  acepta únicamente si cabe, conserva al menos el 55 % del contenido, no pierde nombres ni añade problemas; la versión completa queda en la
+  nota (`condensed`). El maquetador prueba al final un margen interior más estrecho dentro del globo. El tope fijo del cuerpo mínimo baja
+  del 0,8 % al 0,72 % de la página (21,6 px en 3 000; el 10 % de la letra de diálogo del propio cómic de prueba ya mide ≤ 22 px). La
+  estimación de caracteres usa exactamente el mismo cuerpo mínimo que el maquetador.
+- **Traducciones montadas en globos pegados:** si los textos originales apenas se rozan (≤ 25 % del menor), las cajas se cortan por el
+  centro del solape (antes no se separaban); si después no cabe, se exporta el original. 21 → 5 pares en el capítulo real.
+- **Controles de calidad nuevos:** `incomplete` (traducción cortada a media frase; pide reparación) y la reformulación no puede dejar la
+  frase colgando; «vosotros» no se marca si el original ya contiene esa forma (texto copiado).
+- **Herramientas de evaluación:** `tools/bench/translate_models.py` (mismas regiones traducidas por varios modelos, con tiempos, tokens,
+  RAM y VRAM), `tools/bench/translate_compare.py` (métricas y frases sonda lado a lado), `tools/export_glyph_metrics.py`;
+  `corpus_eval.py` guarda las cifras del trabajo y la VRAM; `golden_vision.py` reproduce ahora `analyze_page` (búsqueda ampliada y
+  separación de cajas) y `run_parity.py` acepta `PW_CHANNEL` y sirve los `.wasm` de ONNX Runtime.
+
 ### Corregido (fase 2: causas generales encontradas con el capítulo real)
 
 - **Globos ajustados al texto no se reconocían:** el color de fondo se estimaba con un anillo alrededor del texto, que en los globos

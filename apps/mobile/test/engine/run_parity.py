@@ -9,6 +9,7 @@ import base64
 import http.server
 import io
 import json
+import os
 import socketserver
 import sys
 import threading
@@ -20,6 +21,7 @@ from playwright.sync_api import sync_playwright
 
 GOLDEN, DIST, DETECTOR, OCR = (Path(a) for a in sys.argv[1:5])
 ONLY = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else None
+ORT_DIR = Path(__file__).resolve().parents[4] / "node_modules" / "onnxruntime-web" / "dist"
 ISOLATED = "--isolated" in sys.argv
 
 
@@ -32,6 +34,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return str(self.files[path])
         if path.startswith("/golden/"):
             return str(GOLDEN / path[len("/golden/"):])
+        if path.startswith("/ort/"):  # la compilación de pruebas no copia los .wasm de ONNX Runtime: se sirven desde node_modules
+            return str(ORT_DIR / path[len("/ort/"):])
         return str(DIST / path.lstrip("/"))
 
     def end_headers(self):
@@ -281,7 +285,8 @@ def main() -> int:
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         base = f"http://127.0.0.1:{srv.server_address[1]}"
         with sync_playwright() as p:
-            browser = p.chromium.launch()
+            # PW_CHANNEL=msedge usa el Edge instalado (sin descargar Chromium), como las herramientas de tools/bench.
+            browser = p.chromium.launch(**({"channel": os.environ["PW_CHANNEL"]} if os.environ.get("PW_CHANNEL") else {}))
             page = browser.new_page()
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))

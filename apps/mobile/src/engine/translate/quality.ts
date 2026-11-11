@@ -14,6 +14,7 @@ import raw from './prompts.json';
 const Q = raw.quality as {
   echo_words: number; echo_window: number; echo_similarity: number; invented_ratio: number; invented_slack: number;
   cjk: string; cjk_weight: number; vosotros_pattern: string; issue_text: Record<string, string>; missing_text: string; blocking: string[];
+  dangling: string[]; source_dangling: string[]; last_word_pattern: string; cut_end_pattern: string;
 };
 
 export const ISSUE_TEXT = Q.issue_text;
@@ -80,11 +81,40 @@ export function matchCase(source: string, translation: string): string {
   return letters.length >= 3 && upper >= 0.8 * letters.length ? translation.toUpperCase() : translation;
 }
 
+const DANGLING = new Set(Q.dangling);
+const SOURCE_DANGLING = new Set(Q.source_dangling);
+const LAST_WORD = new RegExp(Q.last_word_pattern, 'u');
+const CUT_END = new RegExp(Q.cut_end_pattern, 'u');
+
+/** ¿Acaba el texto en una de esas palabras (sin contar signos)? (port de `ends_dangling`). */
+export function endsDangling(text: string, words: Set<string> = DANGLING): boolean {
+  const m = LAST_WORD.exec(text || '');
+  return !!m && words.has(m[1].toLowerCase());
+}
+
+/** La traducción acaba en una palabra funcional y el original no está abierto (port de `is_incomplete`). */
+export function isIncomplete(source: string, translation: string): boolean {
+  if (!endsDangling(translation)) return false;
+  const src = (source || '').trim();
+  return !(CUT_END.test(src) || endsDangling(src, SOURCE_DANGLING));
+}
+
+/** Sin letras cuando el original las tiene, o «¡»/«¿» de apertura de más (port de `is_garbled`). */
+export function isGarbled(source: string, translation: string): boolean {
+  const t = translation || '';
+  if (contentLength(source) >= 2 && contentLength(t) === 0) return true;
+  const count = (c: string) => t.split(c).length - 1;
+  return count('¡') > count('!') + 1 || count('¿') > count('?') + 1;
+}
+
 export function check(source: string, translation: string, echo: string, variant: string, names: [string, string][]): string[] {
   const issues: string[] = [];
   if (echoMatches(source, echo) === false) issues.push('misaligned');
   if (isInvented(source, translation)) issues.push('invented');
-  if (variant === 'es-419' && hasVosotros(translation)) issues.push('variant');
+  if (isGarbled(source, translation)) issues.push('garbled');
+  if (isIncomplete(source, translation)) issues.push('incomplete');
+  // Si el original ya contiene esa forma, es texto copiado (rótulo «SPINF.OS»), no una elección de la traducción.
+  if (variant === 'es-419' && hasVosotros(translation) && !hasVosotros(source)) issues.push('variant');
   if (lostNames(source, translation, names).length) issues.push('name');
   return issues;
 }

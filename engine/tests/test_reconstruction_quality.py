@@ -38,6 +38,14 @@ def test_layout_never_shrinks_below_its_own_text_and_overlapping_texts_are_left_
     assert separate_layouts([c, d], 1200) == 0 and c.layout_box == (90, 90, 210, 210)
 
 
+def test_texts_that_barely_touch_are_split_at_the_middle_of_the_overlap():
+    # Dos globos pegados del capítulo real (pág. 20 del PDF): los textos se solapan 9 px de 128.
+    a = _region("a", (98, 2017, 226, 2109), (97, 2017, 254, 2113), bubble=True)
+    b = _region("b", (217, 2018, 374, 2139), (159, 2018, 374, 2142), bubble=True)
+    assert separate_layouts([a, b], 3000) == 2
+    assert a.layout_box[2] == b.layout_box[0] == (226 + 217) // 2
+
+
 def test_stacked_texts_are_split_horizontally():
     a = _region("a", (100, 100, 300, 140), (80, 80, 320, 260))
     b = _region("b", (110, 200, 290, 240), (80, 160, 320, 300))

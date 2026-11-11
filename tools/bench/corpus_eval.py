@@ -26,6 +26,7 @@ import json
 import os
 import shutil
 import sys
+import subprocess
 import threading
 import time
 from collections import defaultdict
@@ -143,6 +144,13 @@ class Sampler(threading.Thread):
                     s["llm_cpu"] = self.extra.cpu_percent(None)
                 except psutil.Error:
                     pass
+                if len(self.samples) % 4 == 0:  # VRAM usada de la GPU (toda la tarjeta), cada ~2 s
+                    try:
+                        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+                                             capture_output=True, text=True, timeout=5).stdout.split()
+                        s["vram_mb"] = float(out[0])
+                    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+                        pass
             self.samples.append(s)
 
     def summary(self, key):
@@ -231,6 +239,9 @@ def main() -> int:
     project = call("GET", f"/api/projects/{pid}")
     pages = project.get("pages") or []
     result["run"] = call("GET", f"/api/projects/{pid}/run")
+    # Cifras del trabajo: textos en revisión, reparaciones, JSON inválido / rescatado / recuperado / perdido, reformulados…
+    stored = data / "projects" / pid / "project.json"  # la API no expone `last_job`: se lee del proyecto guardado
+    result["job_stats"] = project.get("last_job") or (json.loads(stored.read_text(encoding="utf-8")).get("last_job") if stored.exists() else {}) or {}
     rows = []
     img_dir = out / "img"
     img_dir.mkdir(parents=True, exist_ok=True)
@@ -259,6 +270,7 @@ def main() -> int:
     result["pages"] = rows
     result["resources"] = {"motor_rss_mb": sampler.summary("rss_mb"), "motor_cpu_pct": sampler.summary("cpu"),
                            "llm_rss_mb": sampler.summary("llm_rss_mb"), "llm_cpu_pct": sampler.summary("llm_cpu"),
+                           "vram_mb": sampler.summary("vram_mb"),
                            "samples": len(sampler.samples)}
     (out / "samples.json").write_text(json.dumps(sampler.samples), encoding="utf-8")
     (out / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")

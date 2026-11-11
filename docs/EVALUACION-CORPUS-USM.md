@@ -11,8 +11,9 @@ con la salida guardada) · **PENDIENTE** · **NO VERIFICADO** · **ESTIMACIÓN**
 > (4) Tiempos de **este PC** (i7-13620H, 16 hilos, 32 GB; visión en CPU con ONNX Runtime 1.31; Qwen3.5-4B en la RTX 4060 con
 > `llama-server` b12017 Vulkan). **No representan al Redmi Note 8 Pro.**
 
-> **Dos versiones.** §3–§10 describen la **línea base** (commit `42cde69`) y se conservan tal cual. §11 describe la **fase 2** (causas
-> generales corregidas) y compara antes/después con el mismo capítulo, los mismos ajustes y el mismo modelo.
+> **Tres versiones.** §3–§10 describen la **línea base** (commit `42cde69`) y se conservan tal cual. §11 describe la **fase 2** (causas
+> generales corregidas) y §12 la **fase 3** (robustez ante JSON inválido, globos, rotulado y comparación de modelos); cada una compara
+> antes/después con el mismo capítulo, los mismos ajustes y el mismo modelo.
 
 ## 1. Corpus e integridad del original
 
@@ -269,6 +270,96 @@ del PDF) y las 46 páginas nuevas en `…/fase2/traducidas/`. Solo en el equipo 
    textos sueltos o en texto plano).
 4. Manga y manhwa reales (japonés vertical, coreano) para valorar el detector experimental donde importa.
 
+## 12. Fase 3 (2026-11-10): robustez, calidad de traducción y reconstrucción — CONFIRMADO salvo lo marcado
+
+Mismo capítulo (46 páginas), mismos ajustes (perfil `mid`, reconstrucción `fast`, CPU para la visión) y mismo modelo (Qwen3.5-4B, mismo
+lanzamiento de `llama-server` que la línea base). La línea base de la fase 2 se conserva (§11, datos en `_evaluacion/…/fase2/`).
+
+### 12.1 Causas encontradas y corregidas (generales, con pruebas y paridad Python ↔ TypeScript)
+
+| Problema | Causa | Corrección |
+|---|---|---|
+| Una respuesta JSON inválida hacía fallar la página (PC) y **detenía todo el capítulo** (móvil) | Error genérico tras un único reintento; en el móvil, `LLMUnavailableError` | `InvalidJSONError` con las respuestas en bruto; sin reintento si se cortó por el tope; rescate de los elementos completos con el eco de SU original; los que faltan, **uno a uno** (2 intentos, 512 tokens, ≤ 24 por página); lo no recuperado conserva el original |
+| **93 de 301 «globos» eran la silueta del texto** (globos llenos de texto) | Dispersión del papel medida con la media (el antialias la inflaba: 23 > 22) y la cola del globo rompía la prueba de convexidad | Dispersión robusta (mediana) y apertura del tamaño de la letra antes de medir la convexidad; un globo debe **contener** su texto |
+| **14 textos rotulados en blanco dentro de globos blancos** (ilegibles) y manchas oscuras al borrar | El color de la letra y del relleno salía del anillo exterior, que en esos globos cae sobre la viñeta | Tono del fondo = papel entre letras (`text_tone`); con globos bien detectados el relleno es su color real |
+| Traducciones basura («¡¡¡¡¡¡») y frases cortadas («ASEGÚRATE DE QUE») rotuladas | Sin control | Controles `garbled` (bloqueante) e `incomplete` (pide reparación) |
+| «VEIS» (vosotros sin tilde) no se detectaba; falso positivo con «SPINF.OS» | Patrón incompleto; texto copiado del original | Monosílabos añadidos; no se marca si el original ya contiene la forma |
+| 21 pares de traducciones montadas | Si los textos originales se tocaban, la separación de cajas no actuaba | Si solo se rozan (≤ 25 % del menor), corte por el centro del solape; si después no cabe, se exporta el original |
+| 51 textos no cabían | Globos mal detectados (caja = texto original), margen interior fijo y tope del cuerpo mínimo (24 px) por encima de la letra pequeña del propio cómic | Globos reales; último intento con margen estrecho; tope 0,72 % de la página (el 10 % de la letra de diálogo del cómic ya mide ≤ 22 px); **comprobación de encaje con las métricas reales de las tipografías** y **reformulación breve** solo de lo que no cabe, aceptada solo si cabe y no pierde contenido |
+
+### 12.2 Pipeline completo, detector por defecto, 46 páginas — fase 2 → fase 3
+
+| Métrica | Fase 2 (línea base) | Fase 3 |
+|---|---|---|
+| Páginas con error | 0 | **0** |
+| «Globos» que eran la silueta del texto (de 428 regiones) | 93 | **7** |
+| Regiones con globo real asociado | 301 | **386** |
+| Textos en revisión | 95 | **25** |
+| Marca `too_long` | 67 | **5** |
+| Sin traducir / original conservado sin borrar | 0 / 1 | 0 / 1 |
+| Textos rotulados | 367 | **415** |
+| **Textos que no caben** (exportados con el original restaurado) | **51** | **7** |
+| Pares de cajas de rotulado solapadas | 21 | **5** |
+| Texto blanco dentro de un globo claro (ilegible) | 14 | **0** |
+| «vosotros» en la salida (es-419) | 0 | 2 (detectados y **marcados para revisión**; el modelo los repitió tras la reparación) |
+| Respuestas JSON inválidas / rescatados / recuperados / perdidos | — (no se contaba) | 3 / 3 / 17 / 0 |
+| Traducción: mediana por página / p90 / total | 22,3 s / 34,7 s / 922 s | 21,0 s / 37,2 s / 1 075 s |
+| Pico de RAM del motor / `llama-server` (RSS) | 1 308 / 11 393 MB | 1 292 / 11 317 MB |
+| VRAM usada (toda la GPU) | no medida | 3,5 GB |
+| Rotulado y exportación, mediana por página | 0,45 s | 0,37 s |
+
+Cómo se midió la última columna: pipeline completo con el código final salvo la regla de «textos que apenas se rozan» de
+`separate_layouts`, que se añadió tras la inspección visual; su efecto se midió aplicándola a las mismas 46 páginas ya traducidas y
+volviendo a exportar (las traducciones no cambian): solapes 21 → 5 y un texto más con el original conservado (6 → 7: «¿POR QUÉ?»,
+que deja «WHY?»). Una primera pasada de la fase 3, sin los cambios posteriores a la inspección, dio 11 textos que no caben.
+
+Tiempos: el equipo alterna regímenes de velocidad (§3); la visión no es comparable entre ejecuciones. La traducción sí (mismo modelo y
+servidor): el total sube un 17 % (922 → 1 075 s) por las llamadas de recuperación (17 textos pedidos uno a uno tras 3 respuestas cortadas) y de reparación; la mediana por página baja.
+
+### 12.3 Recuperación ante JSON inválido en ejecuciones reales — CONFIRMADO
+
+| Ejecución (46 páginas) | Respuestas inválidas | Textos rescatados | Recuperados uno a uno | Perdidos | Páginas con error |
+|---|---|---|---|---|---|
+| Fase 2, detector experimental (antes de esta fase) | 1 | — | — | página entera | **1** |
+| Qwen3.5-4B, configuración de la app, detector por defecto | 3 (cortadas por el tope) | 11 | 30 | 0 | 0 |
+| Qwen3.5-4B, análisis del detector experimental | 2 (cortadas) | 24 | 13 | 0 | 0 |
+| Qwen3.5-9B | 1 (cortada) | 0 | 16 | 0 | 0 |
+| Gemma 4 E4B / 12B | 0 | — | — | — | 0 |
+| Pipeline completo final (§12.2) | 3 (cortadas) → 3 rescatados, 17 recuperados, 0 perdidos, 0 páginas con error | | | | |
+
+Causa observada en los casos reales: la respuesta llega al tope de 4 096 tokens (`finish_reason = length`); repetir la misma petición
+volvería a cortarse, por eso se rescata y se recupera por textos.
+
+### 12.4 Inspección visual de las 46 páginas (Claude, no humana)
+
+Revisadas las 46 páginas exportadas, lado a lado con la fase 2 (láminas fuera del repositorio). **Mejoras vistas:** globos que antes quedaban
+en blanco (texto blanco sobre blanco: págs. 6, 14, 18, 28, 29 del PDF) ahora legibles; desaparecen las manchas oscuras del borrado (págs. 22,
+29) y los textos montados (págs. 20, 42); muchos globos que se dejaban en inglés por no caber ahora se traducen con letra mayor (págs. 5, 6, 12,
+13, 19, 27–29, 33–35, 46). **Defectos vistos en la primera pasada de la fase 3, corregidos después:** una onomatopeya enorme (pág. 24
+«HHUAGGH!») se tomó por diálogo y se borró a medias (regla de contención del globo); «¡¡¡¡¡¡» rotulado (pág. 9, control `garbled`).
+Ejecución final, revisadas otra vez las 46 páginas: la onomatopeya de la pág. 24 queda intacta; **quedan** «¡GOOOOAL!» de la pág. 13
+(onomatopeya cuyo «globo» es su propia silueta: se borra y se rotula como diálogo; igual que en la fase 2 — una regla para tratarla como
+onomatopeya convertía también en onomatopeyas dos diálogos gritados, «STOP. IT.» y «FINE», y se descartó), 5 pares de textos que comparten
+globo y 2 «vosotros» marcados para revisión. Las páginas sin texto se exportan idénticas al original (comprobado píxel a píxel en la pág. 4).
+
+### 12.5 Calidad de la traducción (Qwen3.5-4B; revisión de Claude, no humana)
+
+Lo estructural está resuelto (asociación, recuperación, controles). Siguen los errores **del modelo de 4B**: modismos literales
+(*million dollars*, *doghouse*, *coulda fooled me*), palabras inexistentes («LO SEO», «PUSSELO», «SUCIENO», «PUEZES»), algún cambio de
+sentido y nombres alterados por el OCR («LA OZA»). No se corrigen con reglas sin un modelo mejor: ver la comparación de modelos en
+[MODELOS-INVESTIGACION](MODELOS-INVESTIGACION.md#modelos-mayores-que-qwen35-4b-en-el-pc-rtx-4060-laptop-8-gb--2026-11-10)
+(Gemma 4 E4B: ≈ 3–4 errores en una muestra de 30 frente a ≈ 13 del 4B, más rápida; no se cambia el predeterminado sin decisión del titular).
+
+### 12.6 Lo que queda (PENDIENTE)
+
+1. Errores de comprensión y erratas del modelo de 4B (§12.5). Con datos, el candidato es **Gemma 4 E4B** en PC con GPU; requiere
+   evaluación humana nativa y decisión del titular (no se cambia el predeterminado).
+2. 7 textos siguen sin caber (letra mínima legible alcanzada; se exporta el original, nunca recortado ni desbordado).
+3. Onomatopeyas grandes cuyo «globo» es su silueta (1 caso: «GOOOOAL»), 7 «globos» degenerados en total.
+4. «vosotros» que el modelo repite tras la reparación: se marca para revisión pero se rotula; decidir si debe bloquear.
+5. Manga y manhwa reales (japonés vertical, coreano) y otros cómics: este corpus es uno solo, en inglés.
+6. Teléfono real: nada de esta fase se ha medido en el Redmi (lo hace el titular).
+
 ## Anexo A. Tabla por página
 
 Página del PDF; «Ref.» = palabras de la capa de texto del PDF (indicador); detección A/B = mínimo de 3 repeticiones intercaladas;
@@ -340,6 +431,13 @@ PYTHONPATH=engine python tools/bench/detector_ab.py paginas/ comictextdetector.o
 node tools/bench/export_render.mjs apps/mobile/test/engine/dist-test res/e2e/img res/export
 node tools/bench/manga_det_parity.mjs apps/mobile/test/engine/dist-test paginas/ manga_det.onnx res/ts
 PYTHONPATH=engine python tools/bench/manga_det_compare.py paginas/ res/ts manga_det.onnx paridad.json
+```
+
+Fase 3 (comparación de modelos con las mismas regiones; `llama-server` lanzado como la app, `-c 12288 --parallel 1 -ngl 99`):
+
+```bash
+PYTHONPATH=engine python tools/bench/translate_models.py --pages res/e2e/img --llm-url http://127.0.0.1:8082/v1     --llm-model qwen3.5-9b --llm-pid <pid de llama-server> --out res/modelos/qwen3.5-9b.json
+python tools/bench/translate_compare.py res/modelos/qwen3.5-4b.json res/modelos/qwen3.5-9b.json res/modelos/gemma4-e4b.json
 ```
 
 `cap01.pdf` = páginas 4–49 del PDF del titular (SHA-256 del original en §1; el de cada página importada, en el manifiesto local).

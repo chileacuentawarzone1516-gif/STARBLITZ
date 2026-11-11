@@ -32,7 +32,7 @@ from ..render.inpaint import EraseTarget, Inpainter
 from ..translate.contextual import _REFUSAL, ContextualTranslator, estimate_max_chars, merge_memory
 from ..translate.plain import make_translator
 from ..translate.llm import create_client
-from ..vision.bubbles import find_bubble_exclusive, text_ring_stats
+from ..vision.bubbles import find_bubble_exclusive, text_ring_stats, text_tone
 from ..vision.detector import DetectedBlock, TextDetector
 from ..vision.manga_det import MangaLineDetector
 from ..vision.langid import direction_for, guess_from_blocks, guess_from_text
@@ -145,7 +145,9 @@ class Processor:
         work_units = total_units - pre_units
         progress = _Progress(ctx, run, len(ids), total_units, pre_units, work_units)
         stats: dict = {"pages": len(ids), "pages_with_work": sum(1 for t in todo.values() if t), "lines": 0, "review": 0,
-                       "refused": 0, "edited_by_reviewer": 0, "errors": 0, "model": ""}
+                       "refused": 0, "edited_by_reviewer": 0, "errors": 0, "model": "",
+                       "json_invalid": 0, "json_salvaged": 0, "json_recovered": 0, "json_lost": 0, "repaired": 0,
+                       "condensed": 0}
         started = time.time()
         translator: ContextualTranslator | None = None
         try:
@@ -284,6 +286,10 @@ class Processor:
             stats["review"] += sum(1 for r in result.updated if r.status == "review")
             stats["refused"] += sum(1 for r in result.updated if "refused" in r.flags)
             stats["edited_by_reviewer"] += result.reviewed
+            stats["repaired"] += getattr(result, "repaired", 0)
+            for key, attr in (("json_invalid", "json_invalid"), ("json_salvaged", "salvaged"), ("json_recovered", "recovered"),
+                              ("json_lost", "json_lost"), ("condensed", "condensed")):
+                stats[key] += getattr(result, attr, 0)  # los traductores de texto plano no tienen estas cifras
         else:
             with self.store.lock(project_id):
                 page = self.store.get_page(project_id, pid)
@@ -400,7 +406,7 @@ class Processor:
                 max(0, x1 - int(bw * 0.08)), max(0, y1 - int(bh * 0.08)), min(w, x2 + int(bw * 0.08)), min(h, y2 + int(bh * 0.08)))
 
         kind = _classify(block, bubble, median_line)
-        dark_bg = float(np.mean(bg)) < 100
+        dark_bg = text_tone(img, mask, block.bbox, bubble, bg) < 100
         style = TextStyle(font={"narration": "narration", "sfx": "sfx", "thought": "dialogue"}.get(kind, "dialogue"))
         if dark_bg:
             style.color, style.stroke_color = "#ffffff", "#000000"
@@ -543,6 +549,7 @@ def plan_clean(regions: list[Region]) -> tuple[list[Region], set[str]]:
 
 
 def _classify(block: DetectedBlock, bubble, median_line: float) -> str:
+    big = bool(median_line) and block.line_size > median_line * 2.4 and len(block.lines) <= 2
     if bubble is not None:
         poly = np.array(bubble.polygon)
         x1, y1, x2, y2 = bubble.bbox
@@ -550,7 +557,7 @@ def _classify(block: DetectedBlock, bubble, median_line: float) -> str:
         if len(poly) <= 6 and rect_fill > 0.93:
             return "narration"  # cartela rectangular
         return "dialogue"
-    if median_line and block.line_size > median_line * 2.4 and len(block.lines) <= 2:
+    if big:
         return "sfx"
     return "narration" if len(block.lines) >= 2 else "other"
 
@@ -734,13 +741,20 @@ class _Progress:
         self.ctx.update(min(frac, 0.999), eta_s=self.eta(), detail=self.detail(current, stage))
 
 
+# Solape máximo entre dos textos originales (fracción del menor) para cortarlos igualmente por el centro (medido el 2026-11-10: dos
+# globos pegados con los textos a 9 px de solape se rotulaban uno encima del otro).
+TOUCH_OVERLAP = 0.25
+
+
 def separate_layouts(regions: list[Region], page_height: int) -> int:
     """Evita que dos traducciones se rotulen una encima de otra.
 
     Cada caja de maquetación (`layout_box`) crece hacia el globo o el espacio libre; cuando dos globos están pegados, o dos textos
     comparten globo, las cajas se pisan y el rotulado sale superpuesto (medido el 2026-11-09 en un capítulo real). Regla general:
     se corta por la línea media entre los TEXTOS ORIGINALES, en el eje en que están más separados, y ninguna caja se reduce por
-    debajo de su texto original (que ya cabía ahí). Si los propios textos se solapan, no se toca nada. Devuelve cuántas cajas cambió.
+    debajo de su texto original (que ya cabía ahí). Si los propios textos solo se ROZAN (solape ≤ `TOUCH_OVERLAP` del menor en ese
+    eje: globos pegados con los textos casi tocándose), se corta igualmente por el centro del solape; si la traducción ya no cabe, la
+    exportación conserva el original (nunca se rotula montada). Si se solapan más (mismo globo), no se toca. Devuelve cuántas cambió.
     """
     changed: set[str] = set()
     for i, a in enumerate(regions):
@@ -751,21 +765,28 @@ def separate_layouts(regions: list[Region], page_height: int) -> int:
             ta, tb = a.bbox, b.bbox
             gap_x = max(tb[0] - ta[2], ta[0] - tb[2])
             gap_y = max(tb[1] - ta[3], ta[1] - tb[3])
-            if gap_x < 0 and gap_y < 0:
-                continue  # los textos originales se solapan: no hay corte limpio
+            touching = gap_x < 0 and gap_y < 0
+            if touching:
+                # Los textos se solapan: solo si apenas se rozan en el eje con menos solape (si no, comparten globo).
+                if gap_x >= gap_y:
+                    extent = min(ta[2] - ta[0], tb[2] - tb[0])
+                else:
+                    extent = min(ta[3] - ta[1], tb[3] - tb[1])
+                if -max(gap_x, gap_y) > TOUCH_OVERLAP * max(1, extent):
+                    continue
             if gap_x >= gap_y:
                 left, right = (a, b) if ta[0] <= tb[0] else (b, a)
                 cut = (left.bbox[2] + right.bbox[0]) // 2
                 lo, ro = list(left.layout_box), list(right.layout_box)
-                lo[2] = max(min(lo[2], cut), left.bbox[2])
-                ro[0] = min(max(ro[0], cut), right.bbox[0])
+                lo[2] = min(lo[2], cut) if touching else max(min(lo[2], cut), left.bbox[2])
+                ro[0] = max(ro[0], cut) if touching else min(max(ro[0], cut), right.bbox[0])
                 left.layout_box, right.layout_box = tuple(lo), tuple(ro)
             else:
                 top, bottom = (a, b) if ta[1] <= tb[1] else (b, a)
                 cut = (top.bbox[3] + bottom.bbox[1]) // 2
                 to, bo = list(top.layout_box), list(bottom.layout_box)
-                to[3] = max(min(to[3], cut), top.bbox[3])
-                bo[1] = min(max(bo[1], cut), bottom.bbox[1])
+                to[3] = min(to[3], cut) if touching else max(min(to[3], cut), top.bbox[3])
+                bo[1] = max(bo[1], cut) if touching else min(max(bo[1], cut), bottom.bbox[1])
                 top.layout_box, bottom.layout_box = tuple(to), tuple(bo)
             changed.update((a.id, b.id))
     for r in regions:

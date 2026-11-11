@@ -12,9 +12,14 @@ class ScriptedClient(LLMClient):
         self.responses = list(responses)
         self.calls = []
 
-    def _chat(self, messages, schema, *, model, temperature, cancel=None):
-        self.calls.append({"messages": messages, "schema": schema, "temperature": temperature})
-        return self.responses.pop(0)
+    def _chat(self, messages, schema, *, model, temperature, cancel=None, max_tokens=None):
+        self.calls.append({"messages": messages, "schema": schema, "temperature": temperature, "max_tokens": max_tokens})
+        r = self.responses.pop(0)
+        if isinstance(r, dict) and "raw" in r:  # respuesta con motivo de fin (p. ej. «length» = cortada por el tope)
+            self.last_finish = r.get("finish", "stop")
+            return r["raw"]
+        self.last_finish = "stop"
+        return r
 
     def health(self):
         return {"ok": True}
@@ -136,3 +141,51 @@ def test_fiction_fidelity_instruction_in_system_prompt():
     tr.translate_page(_project(), _page(["殺してやる、バカ"]), prev_page=None, next_page=None, story=[], image_jpeg=None)
     system = client.calls[0]["messages"][0].content
     assert "no los suavices" in system and "ficción" in system
+
+
+# --- Recuperación ante JSON inválido (2026-11-10) ------------------------------------------------------------------------
+
+def _one(n, text, echo):
+    return {"n": n, "src_start": echo, "translation": text, "speaker": "", "emotion": "", "confidence": 0.9, "flags": [],
+            "note": "", "source_fix": ""}
+
+
+def test_truncated_page_response_is_salvaged_and_recovered_text_by_text():
+    from starblitz_engine.translate.llm import salvage_items
+
+    page = _page(["Hello there friend", "See you later", "Good night"])
+    cut = '{"items": [' + json.dumps(_one(1, "Hola, amigo", "Hello there friend")) + ', {"n": 2, "translation": "Nos ve'
+    assert [i["n"] for i in salvage_items([cut])] == [1]
+    client = ScriptedClient([
+        {"raw": cut, "finish": "length"},                                     # cortada: no se reintenta igual
+        json.dumps({"items": [_one(2, "Nos vemos", "See you later")], "new_terms": [], "characters": [], "page_summary": ""}),
+        "nada", "tampoco",                                                    # el 3, ilegible dos veces…
+        "otra vez nada", "{",                                                 # …y en su segundo intento
+    ])
+    tr = ContextualTranslator(client, "m", TranslationSettings())
+    result = tr.translate_page(_project(), page, prev_page=None, next_page=None, story=[], image_jpeg=None)
+    by_id = {r.id: r for r in result.updated}
+    assert by_id["r0"].translation == "Hola, amigo" and by_id["r1"].translation == "Nos vemos"
+    assert by_id["r2"].translation == "" and "untranslated" in by_id["r2"].flags  # se conserva el original
+    assert (result.json_invalid, result.salvaged, result.recovered, result.json_lost) == (3, 1, 1, 1)
+    assert len(client.calls) == 6 and client.calls[1]["max_tokens"] == 512   # reintentos acotados, tope bajo por texto
+
+
+def test_salvaged_item_with_someone_elses_echo_is_not_used():
+    page = _page(["Where is my umbrella", "Nobody knows"])
+    broken = '{"items": [' + json.dumps(_one(1, "Nadie lo sabe", "Nobody knows")) + ", {"   # el 1 trae el texto del 2
+    good = json.dumps({"items": [_one(1, "¿Dónde está mi paraguas?", "Where is my")], "new_terms": [], "characters": [], "page_summary": ""})
+    good2 = json.dumps({"items": [_one(2, "Nadie lo sabe", "Nobody knows")], "new_terms": [], "characters": [], "page_summary": ""})
+    client = ScriptedClient([{"raw": broken, "finish": "length"}, good, good2])
+    result = ContextualTranslator(client, "m", TranslationSettings()).translate_page(
+        _project(), page, prev_page=None, next_page=None, story=[], image_jpeg=None)
+    assert [r.translation for r in result.updated] == ["¿Dónde está mi paraguas?", "Nadie lo sabe"]
+    assert (result.salvaged, result.recovered) == (0, 2)
+
+
+def test_short_version_cannot_leave_the_sentence_hanging():
+    from starblitz_engine.translate.contextual import _acceptable_short
+
+    assert not _acceptable_short("AFTER YOU-", "Después de usted—", "Después de—", "es-419", [])
+    assert _acceptable_short("I DON'T CARE WHO YOU THINK YOU ARE", "No me importa quién crees que eres",
+                             "Me da igual quién te crees", "es-419", [])

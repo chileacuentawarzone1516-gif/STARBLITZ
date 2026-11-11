@@ -46,6 +46,16 @@ PAPER_MIN_PIXELS = 30
 PAPER_MAX_SPREAD = 22.0
 
 
+def robust_spread(pixels: np.ndarray, median: np.ndarray) -> float:
+    """Dispersión robusta: mediana de la mayor desviación por canal respecto a la mediana.
+
+    La media de las desviaciones (lo que se usaba) la inflan los píxeles de antialias de las letras: en un globo blanco con texto
+    denso daba 23 > 22 y se descartaba el papel (medido el 2026-11-10 en 93 de 301 globos del capítulo real)."""
+    if len(pixels) == 0:
+        return 0.0
+    return float(np.median(np.abs(pixels.astype(np.float64) - median).max(axis=1)))
+
+
 def paper_stats(img_bgr: np.ndarray, text_mask: np.ndarray, bbox) -> tuple[np.ndarray, float] | None:
     """Color del «papel» que se ve ENTRE las letras, dentro del propio bloque (sin los trazos ni su borde).
 
@@ -62,7 +72,21 @@ def paper_stats(img_bgr: np.ndarray, text_mask: np.ndarray, bbox) -> tuple[np.nd
     if len(pixels) < PAPER_MIN_PIXELS:
         return None
     median = np.median(pixels, axis=0)
-    return median, float(np.mean(np.abs(pixels.astype(np.float32) - median)))
+    return median, robust_spread(pixels, median)
+
+
+def text_tone(img_bgr: np.ndarray, text_mask: np.ndarray, bbox, bubble: "BubbleInfo | None", ring: np.ndarray) -> float:
+    """Luminosidad media (0–255) del fondo sobre el que se rotula: decide si la letra va en blanco o en negro.
+
+    Se usaba siempre el anillo exterior: en los globos llenos de texto cae sobre la viñeta (negra) y la traducción salía en
+    BLANCO dentro de un globo blanco, ilegible (12 regiones del capítulo real, 2026-11-10). Orden: papel entre letras si es liso,
+    color del globo, anillo."""
+    paper = paper_stats(img_bgr, text_mask, bbox)
+    if paper is not None and paper[1] < PAPER_MAX_SPREAD:
+        return float(np.mean(paper[0]))
+    if bubble is not None:
+        return float(np.mean(bubble.fill))
+    return float(np.mean(ring))
 
 
 def bubble_background(img_bgr: np.ndarray, text_mask: np.ndarray, bbox) -> tuple[np.ndarray, float]:
@@ -80,6 +104,7 @@ WIDE_WINDOW = 4.0
 WIDE_MAX_AREA = 40.0
 WIDE_MIN_MARGIN = 2.5  # × el lado mayor del bloque: una línea ancha y baja necesita una ventana alta para ver su globo
 GROUP_MIN_MARGIN = 1.0  # al agrupar líneas del detector experimental basta 1× (misma agrupación en el corpus, 38 % más rápido)
+TAIL_CORE_COVER = 0.6  # tras cortar la cola, el globo debe seguir cubriendo al menos este tanto del bloque de texto
 
 
 def point_in_polygon(x: float, y: float, polygon) -> bool:
@@ -163,6 +188,12 @@ def find_bubble(img_bgr: np.ndarray, text_mask: np.ndarray, block: DetectedBlock
 
     comp = (labels == label).astype(np.uint8) * 255
     comp = cv2.morphologyEx(comp, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    # La COLA del globo rompe la prueba de convexidad (un globo lleno de texto con cola daba 0,74 < 0,82 y no se reconocía).
+    # Una apertura del tamaño de la letra la corta; solo se usa si lo que queda sigue cubriendo el bloque de texto.
+    k = max(5, int(block.line_size * 0.9 + 0.5) | 1)
+    opened = cv2.morphologyEx(comp, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    if float(opened[y1 - wy1:y2 - wy1, x1 - wx1:x2 - wx1].mean()) > TAIL_CORE_COVER * 255:
+        comp = opened
     contours, _ = cv2.findContours(comp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
@@ -177,6 +208,11 @@ def find_bubble(img_bgr: np.ndarray, text_mask: np.ndarray, block: DetectedBlock
         return None
     px1, py1 = poly.min(axis=0)
     px2, py2 = poly.max(axis=0)
+    # El globo CONTIENE su texto. Si no (p. ej. una onomatopeya enorme en un estallido: la apertura deja una forma desplazada),
+    # no es su globo: aceptarlo convertía la onomatopeya en «diálogo» y se borraba a medias (2026-11-10).
+    slack = max(4.0, block.line_size * 0.25)
+    if px1 > x1 + slack or py1 > y1 + slack or px2 < x2 - slack or py2 < y2 - slack:
+        return None
     fill = (int(bg[2]), int(bg[1]), int(bg[0]))
     return BubbleInfo(
         polygon=poly.astype(int).tolist(),

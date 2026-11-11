@@ -7,7 +7,7 @@ import { newId } from '../core/ids';
 import { defaultStyle, newRegion } from '../core/schema';
 import { cropClone, scoped, type Cv, type Mat } from '../runtime/cv';
 import { estimateMaxChars } from '../translate/contextual';
-import { findBubbleExclusive, textRingStats, type BubbleInfo } from './bubbles';
+import { findBubbleExclusive, textRingStats, textTone, type BubbleInfo } from './bubbles';
 import type { Box, DetectedBlock, Poly } from './types';
 
 /** Área de un polígono (fórmula de Gauss con coordenadas enteras, como `cv2.contourArea`). */
@@ -21,12 +21,13 @@ export function polygonArea(poly: [number, number][]): number {
 }
 
 export function classify(block: DetectedBlock, bubble: BubbleInfo | null, medianLine: number): RegionKind {
+  const big = !!medianLine && block.lineSize > medianLine * 2.4 && block.lines.length <= 2;
   if (bubble) {
     const [x1, y1, x2, y2] = bubble.bbox;
     const rectFill = polygonArea(bubble.polygon) / Math.max(1, (x2 - x1) * (y2 - y1));
     return bubble.polygon.length <= 6 && rectFill > 0.93 ? 'narration' : 'dialogue'; // cartela rectangular
   }
-  if (medianLine && block.lineSize > medianLine * 2.4 && block.lines.length <= 2) return 'sfx';
+  if (big) return 'sfx';
   return block.lines.length >= 2 ? 'narration' : 'other';
 }
 
@@ -168,7 +169,7 @@ export function makeRegion(cv: Cv, i: MakeRegionInput): Region {
     layout = [Math.max(0, x1 - Math.trunc(bw * 0.08)), Math.max(0, y1 - Math.trunc(bh * 0.08)), Math.min(w, x2 + Math.trunc(bw * 0.08)), Math.min(h, y2 + Math.trunc(bh * 0.08))];
   }
   const kind = classify(block, bubble, i.medianLine);
-  const darkBg = (bg[0] + bg[1] + bg[2]) / 3 < 100;
+  const darkBg = textTone(cv, img, mask, block.bbox, bubble, bg) < 100;
   const style = defaultStyle();
   style.font = kind === 'narration' ? 'narration' : kind === 'sfx' ? 'sfx' : 'dialogue';
   if (darkBg) { style.color = '#ffffff'; style.stroke_color = '#000000'; }
@@ -190,6 +191,9 @@ export function makeRegion(cv: Cv, i: MakeRegionInput): Region {
  * maquetación se pisan, se cortan por la línea media entre los TEXTOS ORIGINALES, en el eje en que están más separados; ninguna
  * caja se reduce por debajo de su texto original y, si los propios textos se solapan, no se toca nada. Devuelve cuántas cambió.
  */
+/** Solape máximo entre dos textos originales (fracción del menor) para cortarlos igualmente por el centro (igual que Python). */
+export const TOUCH_OVERLAP = 0.25;
+
 export function separateLayouts(regions: Region[], pageHeight: number): number {
   const changed = new Set<string>();
   for (let i = 0; i < regions.length; i++) {
@@ -200,20 +204,25 @@ export function separateLayouts(regions: Region[], pageHeight: number): number {
       const ta = a.bbox, tb = b.bbox;
       const gapX = Math.max(tb[0] - ta[2], ta[0] - tb[2]);
       const gapY = Math.max(tb[1] - ta[3], ta[1] - tb[3]);
-      if (gapX < 0 && gapY < 0) continue;
+      const touching = gapX < 0 && gapY < 0;
+      if (touching) {
+        // Los textos se solapan: solo si apenas se rozan en el eje con menos solape (si no, comparten globo). Igual que Python.
+        const extent = gapX >= gapY ? Math.min(ta[2] - ta[0], tb[2] - tb[0]) : Math.min(ta[3] - ta[1], tb[3] - tb[1]);
+        if (-Math.max(gapX, gapY) > TOUCH_OVERLAP * Math.max(1, extent)) continue;
+      }
       if (gapX >= gapY) {
         const [left, right] = ta[0] <= tb[0] ? [a, b] : [b, a];
         const cut = Math.floor((left.bbox[2] + right.bbox[0]) / 2);
         const lo = [...left.layout_box] as Box, ro = [...right.layout_box] as Box;
-        lo[2] = Math.max(Math.min(lo[2], cut), left.bbox[2]);
-        ro[0] = Math.min(Math.max(ro[0], cut), right.bbox[0]);
+        lo[2] = touching ? Math.min(lo[2], cut) : Math.max(Math.min(lo[2], cut), left.bbox[2]);
+        ro[0] = touching ? Math.max(ro[0], cut) : Math.min(Math.max(ro[0], cut), right.bbox[0]);
         left.layout_box = lo; right.layout_box = ro;
       } else {
         const [top, bottom] = ta[1] <= tb[1] ? [a, b] : [b, a];
         const cut = Math.floor((top.bbox[3] + bottom.bbox[1]) / 2);
         const to = [...top.layout_box] as Box, bo = [...bottom.layout_box] as Box;
-        to[3] = Math.max(Math.min(to[3], cut), top.bbox[3]);
-        bo[1] = Math.min(Math.max(bo[1], cut), bottom.bbox[1]);
+        to[3] = touching ? Math.min(to[3], cut) : Math.max(Math.min(to[3], cut), top.bbox[3]);
+        bo[1] = touching ? Math.max(bo[1], cut) : Math.min(Math.max(bo[1], cut), bottom.bbox[1]);
         top.layout_box = to; bottom.layout_box = bo;
       }
       changed.add(a.id); changed.add(b.id);

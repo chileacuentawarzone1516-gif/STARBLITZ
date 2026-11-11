@@ -32,9 +32,9 @@ comprobar aquí.
 |---|---|---|---|
 | Qwen 3.5 2B | Q4_K_M | 1,28 GB | Gama baja (móvil ≤ 5 GB RAM) |
 | Qwen 3.5 4B | Q4_K_M / Q5_K_M | 2,74 / 3,14 GB | Gama media (móvil 6–8 GB RAM) |
-| Gemma 4 E2B / E4B | QAT 4 bits | 3,35 / 5,15 GB | Alternativas para comparar |
+| Gemma 4 E2B / E4B | QAT 4 bits | 3,35 / 5,15 GB | Alternativas para comparar. **E4B: la mejor medida en PC con GPU** (2026-11-10, sin evaluación humana; [comparación](MODELOS-INVESTIGACION.md)) |
 | Qwen 3.5 9B | Q4_K_M | 5,68 GB | Gama alta (móvil ≥ 10 GB) y PC con GPU 6–8 GB |
-| Gemma 4 12B | QAT 4 bits | 6,98 GB | PC con ≥ 10 GB de VRAM |
+| Gemma 4 12B | QAT 4 bits | 6,98 GB | PC con ≥ 10 GB de VRAM (en 8 GB ocupa la GPU entera y Windows llegó a desalojarlo: medido) |
 | Gemma 4 26B‑A4B (MoE) | QAT 4 bits | 14,44 GB | PC con ~16 GB de VRAM o 32 GB de RAM |
 
 El proyector de imágenes (`mmproj`, 0,2–1,2 GB) solo se descarga y se carga si el perfil usa visión en el modelo de

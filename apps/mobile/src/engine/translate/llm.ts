@@ -18,6 +18,22 @@ export interface ChatOptions {
   model: string;
   temperature?: number;
   signal?: AbortSignal;
+  /** Tope de tokens de la respuesta (por defecto `JSON_MAX_TOKENS`); la recuperación por textos usa uno bajo. */
+  maxTokens?: number;
+}
+
+/** Tope de salida de una respuesta JSON (traducción de una página), el mismo que en Python. */
+export const JSON_MAX_TOKENS = 4096;
+
+/**
+ * El modelo no devolvió JSON válido ni tras el reintento (port de `InvalidJSONError`). Guarda las respuestas en bruto para
+ * rescatar lo aprovechable. Antes se lanzaba `LLMUnavailableError` y el procesador detenía TODO el capítulo.
+ */
+export class InvalidJsonError extends Error {
+  constructor(readonly raws: string[], readonly truncated: boolean) {
+    super('El modelo no devolvió una respuesta JSON válida.');
+    this.name = 'InvalidJsonError';
+  }
 }
 
 /** Opciones de una llamada de texto plano (sin JSON): `extra` se mezcla en el cuerpo (p. ej. `chat_template_kwargs`, `stop`). */
@@ -50,17 +66,77 @@ export function parseJson(raw: string): Record<string, unknown> {
   return data as Record<string, unknown>;
 }
 
+const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v);
+
+/**
+ * Elementos COMPLETOS de la lista «items» de respuestas JSON rotas (port de `salvage_items`): cada objeto `{…}` del primer nivel
+ * que se pueda leer entero, con número entero y textos. Si un número se repite, vale el de la primera respuesta. La
+ * correspondencia con el original NO se da por buena aquí: quien los usa exige el eco del original.
+ */
+export function salvageItems(raws: string[]): Record<string, unknown>[] {
+  const out = new Map<number, Record<string, unknown>>();
+  for (const raw of raws) {
+    for (const item of scanItems((raw || '').replace(THINK_RE, '').trim().replace(FENCE_RE, '').trim())) {
+      if (!isInt(item.n)) continue;
+      if (typeof item.translation !== 'string' || ('src_start' in item && typeof item.src_start !== 'string')) continue;
+      if (!out.has(item.n)) out.set(item.n, item);
+    }
+  }
+  return [...out.keys()].sort((a, b) => a - b).map((k) => out.get(k)!);
+}
+
+function scanItems(text: string): Record<string, unknown>[] {
+  const key = text.indexOf('"items"');
+  const start = key >= 0 ? text.indexOf('[', key) : -1;
+  if (start < 0) return [];
+  const items: Record<string, unknown>[] = [];
+  let depth = 0, objStart = -1, inStr = false, esc = false;
+  for (let i = start + 1; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{') { if (depth === 0) objStart = i; depth++; }
+    else if (c === '}' && depth > 0) {
+      depth--;
+      if (depth === 0 && objStart >= 0) {
+        try {
+          const obj: unknown = JSON.parse(text.slice(objStart, i + 1));
+          if (obj && typeof obj === 'object' && !Array.isArray(obj)) items.push(obj as Record<string, unknown>);
+        } catch { /* objeto incompleto o ilegible */ }
+        objStart = -1;
+      }
+    } else if (c === ']' && depth === 0) break;
+  }
+  return items;
+}
+
 export abstract class LLMClient {
+  /** Motivo de fin de la última respuesta: «length» = cortada por el tope de tokens (p. ej. un bucle de repetición). */
+  lastFinish = '';
+
   constructor(protected s: LLMClientSettings) {}
 
-  /** Chat con respuesta JSON validada por esquema; si el modelo devuelve algo ilegible se le pide que lo repare una vez. */
+  /**
+   * Chat con respuesta JSON validada por esquema; si el modelo devuelve algo ilegible se le pide que lo repare una vez (salvo
+   * que se cortara por el tope de tokens: repetirlo se volvería a cortar). Si sigue sin ser JSON, lanza `InvalidJsonError`.
+   */
   async chatJson(messages: ChatMessage[], schema: object, opts: ChatOptions): Promise<Record<string, unknown>> {
     if (opts.signal?.aborted) throw new CancelledError();
     const temperature = opts.temperature ?? this.s.temperature;
+    this.lastFinish = '';
     const raw = await this.chat(messages, schema, { ...opts, temperature });
     try {
       return parseJson(raw);
     } catch {
+      if (this.lastFinish === 'length') {
+        console.warn('Respuesta JSON cortada por el tope de tokens; se rescata lo aprovechable.');
+        throw new InvalidJsonError([raw], true);
+      }
       console.warn('Respuesta JSON inválida; se reintenta con instrucciones de reparación.');
       if (opts.signal?.aborted) throw new CancelledError();
       const repair: ChatMessage[] = [
@@ -68,11 +144,12 @@ export abstract class LLMClient {
         { role: 'assistant', content: Array.from(raw).slice(0, 4000).join('') },
         { role: 'user', content: 'Tu respuesta no era JSON válido según el esquema. Devuelve SOLO el JSON corregido.' },
       ];
+      this.lastFinish = '';
+      const raw2 = await this.chat(repair, schema, { ...opts, temperature: 0.1 });
       try {
-        return parseJson(await this.chat(repair, schema, { ...opts, temperature: 0.1 }));
-      } catch (e) {
-        if (e instanceof CancelledError || e instanceof LLMUnavailableError) throw e;
-        throw new LLMUnavailableError('El modelo no devolvió una respuesta válida. Prueba con otro modelo en la sección Modelos.');
+        return parseJson(raw2);
+      } catch {
+        throw new InvalidJsonError([raw, raw2], this.lastFinish === 'length');
       }
     }
   }
@@ -85,7 +162,7 @@ export abstract class LLMClient {
   abstract health(): Promise<{ ok: boolean }>;
   /** Carga el modelo en memoria por adelantado (solo tiene efecto con el servidor integrado). */
   async warmUp(_model: string, _signal?: AbortSignal): Promise<void> { /* sin efecto */ }
-  protected abstract chat(messages: ChatMessage[], schema: object, opts: Required<Pick<ChatOptions, 'model' | 'temperature'>> & { signal?: AbortSignal }): Promise<string>;
+  protected abstract chat(messages: ChatMessage[], schema: object, opts: Required<Pick<ChatOptions, 'model' | 'temperature'>> & { signal?: AbortSignal; maxTokens?: number }): Promise<string>;
 }
 
 function b64(bytes: Uint8Array): string {
@@ -94,7 +171,7 @@ function b64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
-type ChatArgs = Required<Pick<ChatOptions, 'model' | 'temperature'>> & { signal?: AbortSignal };
+type ChatArgs = Required<Pick<ChatOptions, 'model' | 'temperature'>> & { signal?: AbortSignal; maxTokens?: number };
 
 /** Servidor compatible con OpenAI (LM Studio, KoboldCpp…) o el `llama-server` integrado. */
 export class OpenAICompatibleClient extends LLMClient {
@@ -126,7 +203,7 @@ export class OpenAICompatibleClient extends LLMClient {
       response_format: { type: 'json_schema', json_schema: { name: 'respuesta', schema, strict: true } },
       // Igual que el motor integrado: sin tope ni «enable_thinking=false», Qwen3.5 en un servidor externo razona y puede generar
       // miles de tokens por página (medido el 2026-11-09 en el PC: >8 500 tokens en una sola llamada).
-      max_tokens: 4096, chat_template_kwargs: { enable_thinking: false },
+      max_tokens: a.maxTokens || JSON_MAX_TOKENS, chat_template_kwargs: { enable_thinking: false },
     };
   }
 
@@ -139,7 +216,8 @@ export class OpenAICompatibleClient extends LLMClient {
       throw this.mapFetchError(e, a.signal);
     }
     if (!res.ok) throw new LLMUnavailableError(`El servidor devolvió un error: ${await safeError(res)}`);
-    const data = await res.json() as { choices?: { message?: { content?: string } }[] };
+    const data = await res.json() as { choices?: { message?: { content?: string }; finish_reason?: string | null }[] };
+    this.lastFinish = String(data.choices?.[0]?.finish_reason ?? '');
     return data.choices?.[0]?.message?.content ?? '';
   }
 
@@ -185,7 +263,8 @@ export class BuiltinClient extends OpenAICompatibleClient {
   protected override payload(messages: ChatMessage[], schema: object, a: ChatArgs): Record<string, unknown> {
     return {
       ...super.payload(messages, schema, a),
-      stream: true, stream_options: { include_usage: true }, cache_prompt: true, top_p: 0.9, repeat_penalty: 1.05, max_tokens: 4096,
+      stream: true, stream_options: { include_usage: true }, cache_prompt: true, top_p: 0.9, repeat_penalty: 1.05,
+      max_tokens: a.maxTokens || JSON_MAX_TOKENS,
       chat_template_kwargs: { enable_thinking: false }, // la traducción no necesita razonamiento largo
     };
   }
@@ -243,8 +322,11 @@ export class BuiltinClient extends OpenAICompatibleClient {
           const data = line.slice(5).trim();
           if (data === '[DONE]') { buf = ''; await reader.cancel().catch(() => undefined); break; }
           try {
-            const chunk = JSON.parse(data) as { choices?: { delta?: { content?: string } }[]; usage?: { completion_tokens?: number } };
-            for (const c of chunk.choices ?? []) if (c.delta?.content) parts.push(c.delta.content);
+            const chunk = JSON.parse(data) as { choices?: { delta?: { content?: string }; finish_reason?: string | null }[]; usage?: { completion_tokens?: number } };
+            for (const c of chunk.choices ?? []) {
+              if (c.delta?.content) parts.push(c.delta.content);
+              if (c.finish_reason) this.lastFinish = String(c.finish_reason);
+            }
             if (chunk.usage?.completion_tokens) tokens = chunk.usage.completion_tokens;
           } catch { /* línea parcial o no JSON */ }
         }

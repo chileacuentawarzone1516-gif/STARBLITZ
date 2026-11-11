@@ -194,3 +194,20 @@ ECHO_NOTE = ("En «src_start» copia literalmente las 3 primeras palabras del OR
              "ninguna traducción se cambia de globo).")
 REPAIR_HEADER = ("CORRIGE ESTOS TEXTOS DE LA PÁGINA {page} (cada uno lleva el problema detectado en la traducción anterior). "
                  "Traduce SOLO estos números, solo lo que dice cada original y sin mirar la página siguiente:")
+# Recuperación cuando la respuesta de la página entera no era JSON válido: cada texto que faltó se pide SOLO, con su número.
+RECOVER_HEADER = ("TRADUCE SOLO ESTE TEXTO DE LA PÁGINA {page} (la respuesta anterior de la página llegó incompleta). "
+                  "Traduce solo lo que dice este original:")
+RECOVER_NOTE = "Devuelve un único elemento en «items», con «n» = {n}. {echo} En «page_summary» deja una cadena vacía."
+RECOVER_MAX_SEGMENTS = 24   # textos que se intentan recuperar uno a uno por página (el resto se conserva en el original)
+RECOVER_ATTEMPTS = 2        # intentos por texto
+RECOVER_MAX_TOKENS = 512    # un solo elemento cabe de sobra; corta enseguida un posible bucle de repetición
+
+# Reformulación breve: traducciones más largas de lo que cabe en su globo (capacidad estimada con el cuerpo mínimo del
+# maquetador). Una llamada por página; la respuesta solo se usa si es de verdad más corta y no pierde nombres ni contenido.
+SHORTEN_HEADER = ("ESTAS TRADUCCIONES DE LA PÁGINA {page} NO CABEN EN SU GLOBO. Reescribe cada una más corta, como máximo con "
+                  "los caracteres indicados, conservando TODO su significado, el tono, la persona que habla y los nombres "
+                  "propios: usa sinónimos más cortos, quita repeticiones o muletillas que no aporten y reestructura la frase. "
+                  "No omitas información, no cambies los hechos y no la conviertas en un resumen. Si no se puede acortar sin "
+                  "perder significado, devuelve la traducción IGUAL. En «issue» explica en pocas palabras qué cambiaste.")
+SHORTEN_MIN_KEEP = 0.55     # la versión corta conserva al menos este tanto de las letras de la traducción (no es un resumen)
+SHORTEN_MAX_RATIO = 0.97    # y es al menos un 3 % más corta (si no, no compensa cambiarla)

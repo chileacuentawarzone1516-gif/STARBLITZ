@@ -17,7 +17,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "engine"))
 
-from starblitz_engine.pipeline.processor import Processor, _split_lines  # noqa: E402
+from starblitz_engine.pipeline.processor import Processor, _split_lines, separate_layouts  # noqa: E402
 from starblitz_engine.render.inpaint import EraseTarget, Inpainter  # noqa: E402
 from starblitz_engine.vision.bubbles import find_bubble, text_ring_stats  # noqa: E402
 from starblitz_engine.vision.detector import TextDetector  # noqa: E402
@@ -74,15 +74,22 @@ def run(name: str, path: Path, det: TextDetector, ocr: PaddleOCREngine, inpaint:
     median_line = float(np.median([b.line_size for b in blocks])) if blocks else 0.0
     page = SimpleNamespace(height=int(img.shape[0]))
 
+    centers = [((b.bbox[0] + b.bbox[2]) / 2, (b.bbox[1] + b.bbox[3]) / 2) for b in blocks]
+
     def regions(sfx: str) -> list[dict]:
-        # Las regiones que construye el procesador a partir de lo detectado y leído (sin id ni fecha, que varían).
-        out_regions = []
+        # Las regiones que construye el procesador a partir de lo detectado y leído (sin id ni fecha, que varían), igual que
+        # `analyze_page`: búsqueda ampliada exclusiva (centros de los demás textos) y separación de cajas solapadas.
+        built = []
         for rank, bi in enumerate(order):
             ocr_res = entries[bi]["ocr"]
             if not ocr_res["text"].strip():
                 continue
-            r = Processor._make_region(None, SimpleNamespace(sfx=sfx), page, img, mask, blocks[bi], ocr_res["text"],
-                                       ocr_res["confidence"], ocr_res["engine"], rank, median_line)
+            built.append(Processor._make_region(None, SimpleNamespace(sfx=sfx), page, img, mask, blocks[bi], ocr_res["text"],
+                                                ocr_res["confidence"], ocr_res["engine"], rank, median_line,
+                                                others=[c for k, c in enumerate(centers) if k != bi]))
+        separate_layouts(built, page.height)
+        out_regions = []
+        for r in built:
             d = r.model_dump(mode="json")
             d.pop("id"), d.pop("updated")
             out_regions.append(d)

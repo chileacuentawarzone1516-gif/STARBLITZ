@@ -16,6 +16,13 @@ export const REVIEW_SCHEMA = raw.review_schema as Record<string, unknown>;
 export const REFUSAL_PATTERN = raw.refusal_pattern;
 export const ECHO_NOTE = raw.echo_note;
 export const REPAIR_HEADER = raw.repair_header;
+export const RECOVER_HEADER = raw.recover_header;
+export const RECOVER_NOTE = raw.recover_note;
+/** Recuperación por textos tras una respuesta rota: textos por página, intentos por texto y tope de tokens (de Python). */
+export const RECOVER = raw.recover as { max_segments: number; attempts: number; max_tokens: number };
+export const SHORTEN_HEADER = raw.shorten_header;
+/** Reformulación breve: contenido mínimo que se conserva y cuánto más corta debe ser (de Python). */
+export const SHORTEN = raw.shorten as { min_keep: number; max_ratio: number };
 
 /** Sustituye `{nombre}` por su valor (sin interpretar caracteres especiales del texto de reemplazo). */
 function fill(template: string, values: Record<string, string>): string {

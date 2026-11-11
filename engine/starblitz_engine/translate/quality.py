@@ -12,6 +12,11 @@ Comprobaciones (todas baratas, sin otro modelo):
 - `invented`: la traducción es desproporcionadamente larga para su original (tras «¿QUÉ?» no cabe una frase de 45 letras).
 - `variant`: formas de «vosotros» en una traducción a español latinoamericano.
 - `name`: un nombre propio conocido (personajes y glosario) está en el original y desaparece de la traducción.
+- `incomplete`: la traducción acaba en una palabra que no puede cerrar una frase («de», «que», «con»…) y el original NO está
+  cortado (no acaba en guion ni puntos suspensivos). Medido el 2026-11-10: «MAKE SURE IT'S DONE» → «ASEGÚRATE DE QUE», y una
+  reformulación breve aceptó «DESPUÉS DE—» por «Después de usted—». No bloquea: pide reparación y, si sigue, queda en revisión.
+- `garbled`: la traducción no tiene ninguna letra aunque el original sí, o abre «¡»/«¿» sin cerrarlos (medido el 2026-11-10:
+  Qwen3.5-4B devolvió «¡¡¡¡¡¡» para «UH-HUH.» y «—¡¡¡¡¡¡» para «DROP DEAD, RIGHT?» y se rotularon).
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ _L = "a-zA-ZáéíóúüñÁÉÍÓÚÜÑ"
 VOSOTROS_PATTERN = (
     "(?<![" + _L + "])(?:vosotr[oa]s|vuestr[oa]s?|os"
     "|[" + _L + "]{2,}(?:áis|éis)"   # tenéis, habláis, sabéis («país», «maíz» llevan la tilde en otra vocal)
+    "|veis|sois|vais|dais"            # monosílabos sin tilde (medido el 2026-11-10: «VEIS, MI PADRE…» pasó el control)
     "|id|venid|mirad|escuchad|esperad|parad|corred|dejad|callad|tened|haced|decid|salid|subid)"
     "(?![" + _L + "])"
 )
@@ -113,6 +119,38 @@ def match_case(source: str, translation: str) -> str:
     return translation
 
 
+# Palabras que no pueden cerrar una frase en español (artículos, preposiciones, conjunciones, posesivos átonos).
+DANGLING = ("de", "del", "a", "al", "que", "con", "en", "el", "la", "los", "las", "un", "una", "y", "e", "o", "u", "por", "para",
+            "su", "sus", "mi", "mis", "tu", "tus", "sin", "sobre", "entre", "hacia", "hasta", "desde", "como", "pero", "ni")
+# El original también puede quedar abierto (continúa en el globo siguiente): «I WANT TO STUDY HIM AND».
+SOURCE_DANGLING = ("and", "or", "but", "the", "a", "an", "of", "to", "with", "for", "in", "on", "at", "that", "so", "because",
+                   "if", "than", "as", "my", "your", "his", "her", "our", "their")
+_LAST_WORD = re.compile("([" + _L + "]+)[^" + _L + "0-9]*$")
+_CUT_END = re.compile(r"(?:-|—|–|\.\.|…)\s*[\u0022'»”]*\s*$")  # \u0022 = comillas (válido también en JavaScript con /u)
+
+
+def ends_dangling(text: str, words=DANGLING) -> bool:
+    """¿Acaba el texto en una de esas palabras (sin contar signos)?"""
+    m = _LAST_WORD.search(text or "")
+    return bool(m) and m.group(1).lower() in words
+
+
+def is_incomplete(source: str, translation: str) -> bool:
+    """La traducción acaba en una palabra funcional y el original no está abierto (guion, puntos suspensivos o conjunción)."""
+    if not ends_dangling(translation):
+        return False
+    src = (source or "").strip()
+    return not (_CUT_END.search(src) or ends_dangling(src, SOURCE_DANGLING))
+
+
+def is_garbled(source: str, translation: str) -> bool:
+    """Sin letras cuando el original las tiene, o «¡»/«¿» de apertura de más (sin su cierre)."""
+    t = translation or ""
+    if content_length(source) >= 2 and content_length(t) == 0:
+        return True
+    return t.count("¡") > t.count("!") + 1 or t.count("¿") > t.count("?") + 1
+
+
 def check(source: str, translation: str, echo: str, variant: str, names: list[tuple[str, str]]) -> list[str]:
     """Problemas de una traducción, en orden de gravedad."""
     issues: list[str] = []
@@ -120,7 +158,12 @@ def check(source: str, translation: str, echo: str, variant: str, names: list[tu
         issues.append("misaligned")
     if is_invented(source, translation):
         issues.append("invented")
-    if variant == "es-419" and has_vosotros(translation):
+    if is_garbled(source, translation):
+        issues.append("garbled")
+    if is_incomplete(source, translation):
+        issues.append("incomplete")
+    # Si el original ya contiene esa forma, es texto copiado (rótulo «SPINF.OS»), no una elección de la traducción.
+    if variant == "es-419" and has_vosotros(translation) and not has_vosotros(source):
         issues.append("variant")
     if lost_names(source, translation, names):
         issues.append("name")
@@ -132,12 +175,14 @@ ISSUE_TEXT = {
     "invented": "la traducción anterior añadía contenido que no está en el original; traduce solo lo que dice",
     "variant": "usaba «vosotros» o sus formas (-áis, -éis, os, vuestro); usa «ustedes»",
     "name": "cambió o quitó un nombre propio; cópialo tal cual: {names}",
+    "garbled": "la traducción anterior no era texto legible (solo signos repetidos); traduce lo que dice el original",
+    "incomplete": "la traducción anterior quedó cortada a media frase; tradúcela completa",
 }
 
 MISSING_TEXT = "no devolviste traducción para este texto"
 
 # Problemas que, si persisten tras la reparación, impiden usar la traducción (se conserva el original en el dibujo).
-BLOCKING = ("misaligned", "invented")
+BLOCKING = ("misaligned", "invented", "garbled")
 
 
 def describe(issues: list[str], lost: list[str]) -> str:

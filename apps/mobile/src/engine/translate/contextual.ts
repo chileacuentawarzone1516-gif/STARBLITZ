@@ -10,12 +10,13 @@ import type { Character, GlossaryEntry, Page, Project, Region, Settings } from '
 import { CancelledError } from '../core/errors';
 import { hashBytes, hashText, type DocCache } from '../pipeline/cache';
 import { effectiveLang } from '../core/schema';
-import type { ChatMessage, LLMClient } from './llm';
+import { InvalidJsonError, salvageItems, type ChatMessage, type LLMClient } from './llm';
 import {
-  ECHO_NOTE, KIND_LABELS, LANG_NAMES, REFUSAL_PATTERN, REPAIR_HEADER, REVIEW_SCHEMA, SUMMARY_NOTE, TRANSLATION_SCHEMA, reviewerSystem,
-  translatorSystem,
+  ECHO_NOTE, KIND_LABELS, LANG_NAMES, RECOVER, RECOVER_HEADER, RECOVER_NOTE, REFUSAL_PATTERN, REPAIR_HEADER, REVIEW_SCHEMA, SHORTEN,
+  SHORTEN_HEADER, SUMMARY_NOTE, TRANSLATION_SCHEMA, reviewerSystem, translatorSystem,
 } from './prompts';
 import * as quality from './quality';
+import { fitChars, regionFits } from './fit';
 
 export const REVIEW_FLAGS = new Set(['ambiguous', 'ocr_suspect', 'wordplay', 'refused', 'variant', 'name']);
 export const MAX_AUTO_GLOSSARY = 250;
@@ -34,7 +35,19 @@ export interface PageTranslation {
   reviewed: number;
   /** Textos que necesitaron la llamada de reparación (desalineados, inventados, «vosotros», nombres, sin traducción). */
   repaired?: number;
+  /** Respuestas del modelo que no eran JSON válido ni tras su reintento. */
+  jsonInvalid?: number;
+  /** Textos rescatados de una respuesta rota (completos y con el eco de SU original). */
+  salvaged?: number;
+  /** Textos recuperados pidiéndolos uno a uno tras una respuesta rota. */
+  recovered?: number;
+  /** Textos que se quedaron sin traducción por respuestas rotas (conservan el original). */
+  jsonLost?: number;
+  /** Traducciones sustituidas por una reformulación más corta porque no cabían en su globo. */
+  condensed?: number;
 }
+
+type JsonStats = { jsonInvalid: number; salvaged: number; recovered: number; condensed: number };
 
 type Item = Record<string, unknown>;
 
@@ -81,11 +94,11 @@ export class ContextualTranslator implements PageTranslator {
   constructor(readonly client: LLMClient, readonly model: string, private s: Settings['translation'], private o: TranslatorOptions = {}) {}
 
   /** Llama al modelo, o devuelve la respuesta guardada si el MISMO mensaje completo (con todo su contexto) ya se tradujo. */
-  private async callJson(kind: 'translate' | 'review', messages: ChatMessage[], schema: object, opts: { model: string; temperature?: number; signal?: AbortSignal }, sources: string[]): Promise<Record<string, unknown>> {
+  private async callJson(kind: 'translate' | 'review', messages: ChatMessage[], schema: object, opts: { model: string; temperature?: number; signal?: AbortSignal; maxTokens?: number }, sources: string[]): Promise<Record<string, unknown>> {
     const cache = this.o.cache;
     let key = '';
     if (cache) {
-      key = hashText(JSON.stringify(['tr-v1', kind, this.o.salt ?? '', opts.model, opts.temperature ?? null,
+      key = hashText(JSON.stringify(['tr-v1', kind, this.o.salt ?? '', opts.model, opts.temperature ?? null, opts.maxTokens ?? null,
         messages.map((m) => [m.role, m.content, (m.images ?? []).map((i) => hashBytes(i))])]));
       const hit = await cache.get<Record<string, unknown>>(key);
       if (hit && isCacheableResult(kind, hit, sources)) { this.stats.cache_hits += 1; return structuredClone(hit); }
@@ -120,26 +133,46 @@ export class ContextualTranslator implements PageTranslator {
     }
     user += `\nDevuelve un elemento en «items» por cada número traducible. ${ECHO_NOTE} En «page_summary»: ${SUMMARY_NOTE}`;
 
-    const result = await this.callJson('translate',
-      [{ role: 'system', content: system }, { role: 'user', content: user, images: o.imageJpeg ? [o.imageJpeg] : [] }],
-      TRANSLATION_SCHEMA, { model: this.model, signal: o.signal }, targets.map((r) => r.source_text));
+    const stats: JsonStats = { jsonInvalid: 0, salvaged: 0, recovered: 0, condensed: 0 };
+    let broken = false;
+    let result: Record<string, unknown>;
+    try {
+      result = await this.callJson('translate',
+        [{ role: 'system', content: system }, { role: 'user', content: user, images: o.imageJpeg ? [o.imageJpeg] : [] }],
+        TRANSLATION_SCHEMA, { model: this.model, signal: o.signal }, targets.map((r) => r.source_text));
+    } catch (e) {
+      if (!(e instanceof InvalidJsonError)) throw e;
+      // Una respuesta ilegible ya no detiene nada: se rescatan los textos completos que sí llegaron y el resto se pide uno a uno.
+      console.warn(`Página ${page.index + 1}: respuesta JSON inválida${e.truncated ? ' (cortada por el tope de tokens)' : ''}; se recupera por textos.`);
+      broken = true;
+      stats.jsonInvalid += 1;
+      result = { items: salvageItems(e.raws), new_terms: [], characters: [], page_summary: '' };
+    }
     const byN = indexByNumber(result.items);
 
     const drafts = new Map<string, Item>();
     for (const r of targets) {
       const item = byN.get(numbering.get(r.id)!);
-      if (item) drafts.set(r.id, item);
+      // De una respuesta rota solo vale un texto con el eco de SU original (la estructura ya no garantiza el orden).
+      if (item && (!broken || quality.echoMatches(r.source_text, str(item.src_start)) === true)) drafts.set(r.id, item);
     }
+    stats.salvaged = broken ? drafts.size : 0;
 
     const names = quality.knownNames(project.characters, effectiveGlossary(project, this.s.dictionary ?? []));
-    const repaired = await this.repair(project, page, targets, numbering, drafts, names, system,
-      this.contextBlock(project, page, o.prevPage, null, o.story, true), o.signal);
+    const compact = this.contextBlock(project, page, o.prevPage, null, o.story, true);
+    let tried = new Set<string>();
+    if (broken) {
+      tried = await this.recover(project, page, targets.filter((r) => !drafts.has(r.id)), numbering, drafts, names, system, compact, o.signal, stats);
+    }
+    const repaired = await this.repair(project, page, targets.filter((r) => !tried.has(r.id)), numbering, drafts, names, system,
+      compact, o.signal, stats);
 
     let reviewed = 0;
     if (this.s.quality === 'max' && drafts.size) {
       reviewed = await this.review(project, page, targets, numbering, drafts,
-        this.contextBlock(project, page, o.prevPage, null, o.story, true), o.signal);
+        this.contextBlock(project, page, o.prevPage, null, o.story, true), o.signal, stats);
     }
+    await this.shorten(project, page, targets, numbering, drafts, names, compact, o.signal, stats);
 
     const updated: Region[] = [];
     for (const r of targets) {
@@ -148,7 +181,9 @@ export class ContextualTranslator implements PageTranslator {
       if (!item || !str(item.translation).trim()) {
         region.flags = sortedUnion(region.flags, ['untranslated']);
         region.status = 'review';
-        region.note = region.note || 'El modelo no devolvió traducción para este texto.';
+        region.note = tried.has(r.id)
+          ? 'El modelo devolvió una respuesta ilegible y este texto no se pudo recuperar: se conserva el original. Vuelve a traducirlo o escríbelo a mano.'
+          : region.note || 'El modelo no devolvió traducción para este texto.';
         updated.push(region);
         continue;
       }
@@ -182,6 +217,11 @@ export class ContextualTranslator implements PageTranslator {
       region.note = cut(str(item.note), 500);
       region.review_note = cut(str(item.issue), 300);
       region.ocr_fix = flags.has('ocr_suspect') ? cut(str(item.source_fix), 400) : '';
+      if (item.condensed_from) {
+        flags.add('condensed');
+        const full = `Versión completa (no cabía en el globo): ${str(item.condensed_from)}`;
+        region.note = cut(region.note ? `${region.note} · ${full}` : full, 500);
+      }
       region.confidence = confidence;
       if (r.max_chars && [...text].length > r.max_chars * 1.35) flags.add('too_long');
       region.flags = [...flags].sort();
@@ -200,7 +240,97 @@ export class ContextualTranslator implements PageTranslator {
       const gender = (['m', 'f', 'n', '?'] as const).find((g) => g === c.gender) ?? '?';
       characters.push({ source: cut(str(c.source).trim(), 80), target: cut(str(c.target).trim(), 80), gender, speech: cut(str(c.speech), 200), locked: false });
     }
-    return { updated, summary: cut(str(result.page_summary), 600), newTerms, characters, reviewed, repaired };
+    const jsonLost = targets.filter((r) => tried.has(r.id) && !drafts.has(r.id)).length;
+    return {
+      updated, summary: cut(str(result.page_summary), 600), newTerms, characters, reviewed, repaired,
+      jsonInvalid: stats.jsonInvalid, salvaged: stats.salvaged, recovered: stats.recovered, jsonLost, condensed: stats.condensed,
+    };
+  }
+
+  // ------------------------------------------------------------------
+  /**
+   * Reformulación breve de las traducciones que no caben en su globo (port de `_shorten`): una sola llamada por página; la versión
+   * corta solo sustituye a la anterior si es de verdad más corta, conserva la mayor parte del contenido, no pierde nombres y no
+   * tiene problemas nuevos. La versión completa queda en la nota y se marca «condensed».
+   */
+  private async shorten(project: Project, page: Page, targets: Region[], numbering: Map<string, number>, drafts: Map<string, Item>,
+                        names: [string, string][], userContext: string, signal: AbortSignal | undefined, stats: JsonStats): Promise<void> {
+    const longOnes: [Region, string, number][] = [];
+    for (const r of targets) {
+      const d = drafts.get(r.id);
+      if (!d) continue;
+      const text = clean(str(d.final || d.translation));
+      if (!text || isRefusal(text)) continue;
+      const shown = quality.matchCase(r.source_text, text); // se rotula con las mayúsculas del original
+      if (regionFits(r, shown, page.height)) continue;
+      const target = fitChars(r, shown, page.height);
+      // Si cabe menos del mínimo de contenido que se exige, acortarlo sería resumirlo: no se pide (se conserva el original).
+      if (target >= [...text].length * SHORTEN.min_keep) longOnes.push([r, text, target]);
+    }
+    if (!longOnes.length) return;
+    const system = reviewerSystem(project.target_variant, project.translation_profile);
+    const lines = longOnes.map(([r, text, target]) => `[${numbering.get(r.id)}] (máx. ~${target} caracteres; ahora ${[...text].length})\n  ORIGINAL: ${r.source_text}\n  TRADUCCIÓN: ${text}`);
+    const user = `${userContext}\n\n${SHORTEN_HEADER.replace('{page}', String(page.index + 1))}\n${lines.join('\n')}\n\nDevuelve un elemento por línea con la versión final.`;
+    let result: Record<string, unknown>;
+    try {
+      result = await this.callJson('review', [{ role: 'system', content: system }, { role: 'user', content: user }], REVIEW_SCHEMA,
+        { model: this.model, temperature: 0.2, signal }, longOnes.map(([r]) => r.source_text));
+    } catch (e) { // acortar es una mejora: si falla se conserva la traducción completa
+      if (e instanceof CancelledError) throw e;
+      if (e instanceof InvalidJsonError) stats.jsonInvalid += 1;
+      console.warn(`Fallo al acortar textos de la página ${page.index + 1}:`, e instanceof Error ? e.message : e);
+      return;
+    }
+    const byN = indexByNumber(result.items);
+    for (const [r, text] of longOnes) {
+      const it = byN.get(numbering.get(r.id)!);
+      const short = it ? clean(str(it.final)) : '';
+      if (!acceptableShort(r.source_text, text, short, project.target_variant, names)) continue;
+      if (!regionFits(r, quality.matchCase(r.source_text, short), page.height)) continue; // más corta pero sigue sin caber
+      const d = drafts.get(r.id)!;
+      d.final = short;
+      d.condensed_from = text;
+      stats.condensed += 1;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  /**
+   * Tras una respuesta rota, pide cada texto que faltó por separado (port de `_recover`): `RECOVER.attempts` intentos con un tope de
+   * tokens bajo; se acepta solo un elemento con SU número, traducción no vacía y sin problemas que impidan usarla. Devuelve los
+   * ids intentados: no vuelven a la llamada de reparación (los reintentos están acotados).
+   */
+  private async recover(project: Project, page: Page, missing: Region[], numbering: Map<string, number>, drafts: Map<string, Item>,
+                        names: [string, string][], system: string, userContext: string, signal: AbortSignal | undefined,
+                        stats: JsonStats): Promise<Set<string>> {
+    const tried = new Set<string>();
+    for (const r of missing.slice(0, RECOVER.max_segments)) {
+      tried.add(r.id);
+      const n = numbering.get(r.id)!;
+      const user = `${userContext}\n\n${RECOVER_HEADER.replace('{page}', String(page.index + 1))}\n`
+        + `[${n}] (${KIND_LABELS[r.kind] ?? r.kind}, máx. ~${r.max_chars} caracteres) ${r.source_text}\n`
+        + `\n${RECOVER_NOTE.replace('{n}', String(n)).replace('{echo}', ECHO_NOTE)}`;
+      for (let attempt = 0; attempt < RECOVER.attempts; attempt++) {
+        let items: Item[];
+        try {
+          const res = await this.callJson('translate', [{ role: 'system', content: system }, { role: 'user', content: user }],
+            TRANSLATION_SCHEMA, { model: this.model, signal, maxTokens: RECOVER.max_tokens }, [r.source_text]);
+          items = (Array.isArray(res.items) ? res.items : []).filter(isObj);
+        } catch (e) {
+          if (!(e instanceof InvalidJsonError)) throw e;
+          stats.jsonInvalid += 1;
+          items = salvageItems(e.raws);
+        }
+        const item = items.find((it) => typeof it.n === 'number' && Number.isInteger(it.n) && it.n === n);
+        if (!item || !str(item.translation).trim()) continue;
+        const issues = quality.check(r.source_text, clean(str(item.translation)), str(item.src_start), project.target_variant, names);
+        if (issues.some((i) => quality.BLOCKING.has(i))) continue;
+        drafts.set(r.id, item);
+        stats.recovered += 1;
+        break;
+      }
+    }
+    return tried;
   }
 
   // ------------------------------------------------------------------
@@ -209,7 +339,7 @@ export class ContextualTranslator implements PageTranslator {
    * que impidan usarla. Devuelve cuántos textos se pidieron de nuevo (igual que `_repair` en Python).
    */
   private async repair(project: Project, page: Page, targets: Region[], numbering: Map<string, number>, drafts: Map<string, Item>,
-                       names: [string, string][], system: string, userContext: string, signal?: AbortSignal): Promise<number> {
+                       names: [string, string][], system: string, userContext: string, signal?: AbortSignal, stats?: JsonStats): Promise<number> {
     const bad: [Region, string][] = [];
     for (const r of targets) {
       const d = drafts.get(r.id);
@@ -226,18 +356,26 @@ export class ContextualTranslator implements PageTranslator {
     }
     user += `\nDevuelve un elemento en «items» por cada número de esta lista. ${ECHO_NOTE} En «page_summary» deja una cadena vacía.`;
     let result: Record<string, unknown>;
+    let strict = false;
     try {
       result = await this.callJson('translate', [{ role: 'system', content: system }, { role: 'user', content: user }],
         TRANSLATION_SCHEMA, { model: this.model, signal }, bad.map(([r]) => r.source_text));
     } catch (e) { // la reparación es una mejora: si falla, deciden las comprobaciones finales
       if (e instanceof CancelledError) throw e;
-      console.warn(`Fallo en la reparación de la página ${page.index + 1}:`, e instanceof Error ? e.message : e);
-      return bad.length;
+      if (e instanceof InvalidJsonError) { // respuesta rota: se aprovecha lo completo que traiga el eco de SU original
+        if (stats) stats.jsonInvalid += 1;
+        result = { items: salvageItems(e.raws) };
+        strict = true;
+      } else {
+        console.warn(`Fallo en la reparación de la página ${page.index + 1}:`, e instanceof Error ? e.message : e);
+        return bad.length;
+      }
     }
     const byN = indexByNumber(result.items);
     for (const [r] of bad) {
       const it = byN.get(numbering.get(r.id)!);
       if (!it || !str(it.translation).trim()) continue;
+      if (strict && quality.echoMatches(r.source_text, str(it.src_start)) !== true) continue;
       const again = quality.check(r.source_text, clean(str(it.translation)), str(it.src_start), project.target_variant, names);
       if (!again.some((i) => quality.BLOCKING.has(i))) drafts.set(r.id, it);
     }
@@ -246,7 +384,7 @@ export class ContextualTranslator implements PageTranslator {
 
   // ------------------------------------------------------------------
   private async review(project: Project, page: Page, targets: Region[], numbering: Map<string, number>,
-                       drafts: Map<string, Item>, userContext: string, signal?: AbortSignal): Promise<number> {
+                       drafts: Map<string, Item>, userContext: string, signal?: AbortSignal, stats?: JsonStats): Promise<number> {
     const system = reviewerSystem(project.target_variant, project.translation_profile);
     const lines: string[] = [];
     for (const r of targets) {
@@ -264,6 +402,7 @@ export class ContextualTranslator implements PageTranslator {
       result = await this.callJson('review', messages, REVIEW_SCHEMA, { model: this.model, temperature: 0.2, signal }, targets.map((r) => r.source_text));
     } catch (e) { // la corrección es una mejora: si falla se conserva el borrador
       if (e instanceof CancelledError) throw e;
+      if (e instanceof InvalidJsonError && stats) stats.jsonInvalid += 1;
       console.warn(`Fallo en la revisión editorial de la página ${page.index + 1}:`, e instanceof Error ? e.message : e);
       return 0;
     }
@@ -366,8 +505,11 @@ export function mergeMemory(project: Project, result: Pick<PageTranslation, 'new
 export function estimateMaxChars(box: [number, number, number, number], lineSize: number, pageHeight: number, inBubble: boolean): number {
   const [x1, y1, x2, y2] = box;
   const w = Math.max(1, x2 - x1), h = Math.max(1, y2 - y1);
-  // Mismo cuerpo mínimo que el maquetador (`sizeBounds`, 0,8 % de la altura); antes 1,3 % y «too_long» saltaba casi siempre.
-  const font = Math.max(lineSize * 0.8, pageHeight * 0.008, 11.0);
+  // EXACTAMENTE el cuerpo mínimo del maquetador (`sizeBounds`): hasta el 75 % del cuerpo original, entre el 0,5 % y el 0,8 % de la
+  // página (antes se tomaba el mayor de los dos y la capacidad salía corta).
+  const fixed = Math.max(8.0, pageHeight * 0.0072); // = fit.MIN_FONT_CAP
+  const relative = lineSize > 0 ? lineSize * 0.75 : fixed;
+  const font = Math.max(8.0, pageHeight * 0.005, Math.min(fixed, relative));
   const fillRatio = inBubble ? 0.62 : 0.8; // los globos elípticos aprovechan menos superficie
   const perLine = Math.max(1.0, (w * 0.9) / (font * 0.55));
   const lines = Math.max(1.0, (h * 0.9) / (font * 1.15));
@@ -375,6 +517,15 @@ export function estimateMaxChars(box: [number, number, number, number], lineSize
 }
 
 // ---------------------------------------------------------------------------
+
+/** ¿La reformulación corta puede sustituir a la traducción? (port de `_acceptable_short`). */
+export function acceptableShort(source: string, text: string, short: string, variant: string, names: [string, string][]): boolean {
+  if (!short || isRefusal(short) || [...short].length > [...text].length * SHORTEN.max_ratio) return false;
+  if (quality.contentLength(short) < quality.contentLength(text) * SHORTEN.min_keep) return false;
+  if (quality.endsDangling(short) && !quality.endsDangling(text)) return false; // «Después de usted—» → «Después de—»
+  const before = new Set(quality.check(source, text, '', variant, names));
+  return quality.check(source, short, '', variant, names).every((i) => before.has(i));
+}
 
 export function clean(text: string): string {
   let t = text.trim().replace(QUOTES, '');

@@ -145,6 +145,8 @@ export class FakeLlm extends LLMClient {
   warmed = 0;
   async warmUp(): Promise<void> { this.warmed += 1; this.log?.push('warm'); }
   refuse: (text: string) => boolean = () => false;
+  /** Páginas (número de «PÁGINA ACTUAL») cuya respuesta completa llega CORTADA por el tope de tokens (JSON inválido). */
+  brokenPages: Set<number> = new Set();
   hook: ((call: LlmCall) => Promise<void> | void) | null = null;
   constructor() { super({ temperature: 0.3, timeout_s: 60, use_vision: true }); }
   async health() { return { ok: this.healthy }; }
@@ -188,6 +190,11 @@ export class FakeLlm extends LLMClient {
       });
     }
     const first = /PÁGINA ACTUAL \((\d+)\//.exec(user.content)?.[1] ?? '?';
+    if (this.brokenPages.has(Number(first))) {
+      this.lastFinish = 'length'; // bucle de repetición cortado por el tope: JSON sin cerrar
+      return `{"items": [{"n": 1, "translation": "${'no, '.repeat(40)}`;
+    }
+    this.lastFinish = 'stop';
     return JSON.stringify({ items, page_summary: `Resumen de la página ${first}`, new_terms: [{ source: '先輩', target: 'sempai', note: '' }], characters: [{ source: '愛子', target: 'Aiko', gender: 'f', speech: 'educada' }] });
   }
 }

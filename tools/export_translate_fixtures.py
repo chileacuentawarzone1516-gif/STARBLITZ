@@ -21,7 +21,8 @@ from starblitz_engine.translate import quality as Q  # noqa: E402
 from starblitz_engine.translate.contextual import (  # noqa: E402
     _REFUSAL, ContextualTranslator, PageTranslation, estimate_max_chars, merge_memory,
 )
-from starblitz_engine.translate.llm import ChatMessage, LLMClient, parse_json  # noqa: E402
+from starblitz_engine.translate.llm import ChatMessage, LLMClient, parse_json, salvage_items  # noqa: E402
+from starblitz_engine.translate import fit as F  # noqa: E402
 from starblitz_engine.core.settings import LLMSettings  # noqa: E402
 
 OUT_PROMPTS = ROOT / "apps" / "mobile" / "src" / "engine" / "translate" / "prompts.json"
@@ -37,17 +38,22 @@ class Scripted(LLMClient):
         self.script = list(script)
         self.calls: list[dict] = []
 
-    def _chat(self, messages, schema, *, model, temperature, cancel=None):
+    def _chat(self, messages, schema, *, model, temperature, cancel=None, max_tokens=None):
         self.calls.append({
             "messages": [{"role": m.role, "content": m.content, "images": len(m.images)} for m in messages],
             "schema": "translation" if "new_terms" in schema["properties"] else "review",
-            "temperature": temperature, "model": model,
+            "temperature": temperature, "model": model, "max_tokens": max_tokens,
         })
-        return self.script.pop(0)
+        step = self.script.pop(0) if self.script else ""  # guion agotado: respuesta vacía, igual que el doble de TypeScript
+        if isinstance(step, dict):  # {"raw": ..., "finish": "length"}: respuesta cortada por el tope de tokens
+            self.last_finish = step.get("finish", "stop")
+            return step["raw"]
+        self.last_finish = "stop"
+        return step
 
 
 def region(i: int, text: str, **kw) -> Region:
-    return Region(id=f"r{i}", order=i, bbox=(0, 0, 10, 10), layout_box=(0, 0, 10, 10), source_text=text,
+    return Region(id=f"r{i}", order=i, bbox=(0, 0, 10, 10), layout_box=kw.pop("layout_box", (0, 0, 10, 10)), source_text=text,
                   max_chars=kw.pop("max_chars", 40), **kw)
 
 
@@ -89,7 +95,8 @@ def run_case(name: str, proj: Project, pg: Page, prev: Page | None, nxt: Page | 
                                "dictionary": [d.model_dump(mode="json") for d in dictionary]}},
         "calls": client.calls,
         "result": {"updated": [dump_region(r) for r in result.updated], "summary": result.summary, "reviewed": result.reviewed,
-                   "repaired": result.repaired,
+                   "repaired": result.repaired, "json_invalid": result.json_invalid, "salvaged": result.salvaged,
+                   "recovered": result.recovered, "json_lost": result.json_lost, "condensed": result.condensed,
                    "new_terms": [t.model_dump(mode="json") for t in result.new_terms],
                    "characters": [c.model_dump(mode="json") for c in result.characters]},
         "merged": {"glossary": [g.model_dump(mode="json") for g in proj.glossary],
@@ -226,10 +233,47 @@ def build_cases() -> list[dict]:
     ok = j(items=[item(1, "¿Tío Ben? ¿Qué haces aquí?", src="UNCLE BEN WHAT"), item(2, "Basado en la historia original", src="Based on the")],
            new_terms=[], characters=[], page_summary="Peter ve a su tío.")
     cases.append(run_case("sin-reparacion-mayusculas", project(**en), cur, None, None, [], False, [ok]))
+
+    # Recuperación ante JSON inválido (2026-11-10). La respuesta de la página se CORTA por el tope de tokens (no se reintenta
+    # igual): se rescata el 1 (eco correcto), se descarta el 2 (eco de otro texto) y se piden uno a uno el 2, el 3 y el 4.
+    cur = page("g2", 1, [region(1, "UNCLE BEN? WHAT ARE YOU DOING HERE?"), region(2, "I THOUGHT YOU WERE AT WORK"),
+                         region(3, "SHE SAID NO"), region(4, "ABOUT TIME")])
+    cut = ('{"items": [' + json.dumps(item(1, "¿Tío Ben? ¿Qué haces aquí?", src="UNCLE BEN WHAT"), ensure_ascii=False) + ", "
+           + json.dumps(item(2, "Dijo que no", src="SHE SAID NO"), ensure_ascii=False)
+           + ', {"n": 3, "src_start": "SHE SAID", "translation": "Dijo que no, no, no, no, no, no')
+    cut4 = '```json\n{"items": [' + json.dumps(item(4, "Ya era hora", src="ABOUT TIME"), ensure_ascii=False) + ', {"n": 4, "src_st'
+    script = [
+        {"raw": cut, "finish": "length"},
+        j(items=[item(2, "Creí que estabas en el trabajo", src="I THOUGHT YOU")], new_terms=[], characters=[], page_summary=""),
+        "esto no es json", "tampoco {",                                        # el 3: ilegible dos veces (con su reintento)
+        j(items=[item(99, "Dijo que no", src="SHE SAID NO")], new_terms=[], characters=[], page_summary=""),  # número ajeno
+        {"raw": cut4, "finish": "length"},                                     # el 4: cortada, pero el elemento llegó entero
+    ]
+    cases.append(run_case("json-invalido-recuperacion", project(**en), cur, None, None, [], False, script))
+    # Ilegible dos veces y sin nada que rescatar: el único texto se recupera solo, al primer intento.
+    cur = page("g2", 1, [region(1, "SEE YOU LATER")])
+    script = ["{\"items\": [ {\"n\": 1, \"src", "{\"items\": nada",
+              j(items=[item(1, "Nos vemos luego", src="SEE YOU LATER")], new_terms=[], characters=[], page_summary="")]
+    cases.append(run_case("json-invalido-sin-rescate", project(**en), cur, None, None, [], False, script))
+
+    # Reformulación breve (2026-11-10): tres textos que no caben. El 1 se acorta bien; el 2 «acortado» pierde un nombre; el 3 se
+    # queda en casi nada (resumen). Solo se acepta el 1; la versión completa queda en la nota.
+    cur = page("g2", 1, [region(1, "I DON'T CARE WHO YOU THINK YOU ARE", max_chars=24, layout_box=(0, 0, 120, 14), line_size=12.8),
+                         region(2, "ISN'T THAT MARY JANE OVER THERE?", max_chars=20),
+                         region(3, "THE CIGARETTE COMPANIES WERE PUTTING ADDICTIVE LEVELS OF NICOTINE", max_chars=30),
+                         region(4, "OK", max_chars=10)])
+    first = j(items=[item(1, "No me importa quién crees que eres", src="I DON'T CARE"),
+                     item(2, "¿No es esa Mary Jane de allá?", src="ISN'T THAT MARY"),
+                     item(3, "Las compañías tabacaleras estaban poniendo niveles adictivos de nicotina", src="THE CIGARETTE COMPANIES"),
+                     item(4, "Vale", src="OK")], new_terms=[], characters=[], page_summary="Una discusión.")
+    short = j(items=[{"n": 1, "final": "Me da igual quién te crees", "issue": "sinónimos", "confidence": 0.8},
+                     {"n": 2, "final": "¿Es ella, allá?", "issue": "", "confidence": 0.8},
+                     {"n": 3, "final": "Tabaco adictivo", "issue": "", "confidence": 0.8}])
+    cases.append(run_case("acortar-no-cabe", project(**en), cur, None, None, [], False, [first, short]))
     return cases
 
 
-QUALITY_CASES = [('HE PARKER HOME FOREST HILLS', '¿Peter? ¿Qué dijimos?', 'PETER? PETER?', 'es-419', []), ('WHAT?', 'Eso debería mantenerla ocupada durante horas.', 'WHAT', 'es-419', []), ("DON'T YOU PUNKS HAVE PRACTICE?", '¿NO TENÉIS PRÁCTICAS? ¡ID A JUGAR!', "DON'T YOU PUNKS", 'es-419', []), ("DON'T YOU PUNKS HAVE PRACTICE?", '¿NO TENÉIS PRÁCTICAS?', "DON'T YOU", 'es-ES', []), ("ISN'T THAT MARY JANE?", '¿NO ES ESA MARÍA-JANE?', "ISN'T THAT", 'es-419', [['Mary Jane', 'Mary Jane']]), ('P.S. 163 QUEENS DISTRICT', 'P.S. 163, DISTRITO DE QUEENS', 'P.S. 163', 'es-419', [['Queens', 'Queens']]), ('TWC TIMES! HA HA!', '¡DOS VECES! ¡JA, JA!', 'TWO TIMES', 'es-419', []), ('すまん、田中！', '¡Lo siento, Tanaka! No volverá a pasar.', 'すまん', 'es-419', [['田中', 'Tanaka']]), ('すまん、田中！', '¡Lo siento!', '先輩', 'es-419', [['田中', 'Tanaka']]), ('미안해, 민지야', 'Lo siento, Min-ji', '', 'es-419', []), ('Based on the story', 'Basado en la historia', 'Based on', 'es-419', []), ('No me gusta este país', 'No me gusta este país y tengo sed', 'No me', 'es-419', []), ('', '', '', 'es-419', [])]
+QUALITY_CASES = [('HE PARKER HOME FOREST HILLS', '¿Peter? ¿Qué dijimos?', 'PETER? PETER?', 'es-419', []), ('WHAT?', 'Eso debería mantenerla ocupada durante horas.', 'WHAT', 'es-419', []), ("DON'T YOU PUNKS HAVE PRACTICE?", '¿NO TENÉIS PRÁCTICAS? ¡ID A JUGAR!', "DON'T YOU PUNKS", 'es-419', []), ("DON'T YOU PUNKS HAVE PRACTICE?", '¿NO TENÉIS PRÁCTICAS?', "DON'T YOU", 'es-ES', []), ("ISN'T THAT MARY JANE?", '¿NO ES ESA MARÍA-JANE?', "ISN'T THAT", 'es-419', [['Mary Jane', 'Mary Jane']]), ('P.S. 163 QUEENS DISTRICT', 'P.S. 163, DISTRITO DE QUEENS', 'P.S. 163', 'es-419', [['Queens', 'Queens']]), ('TWC TIMES! HA HA!', '¡DOS VECES! ¡JA, JA!', 'TWO TIMES', 'es-419', []), ('すまん、田中！', '¡Lo siento, Tanaka! No volverá a pasar.', 'すまん', 'es-419', [['田中', 'Tanaka']]), ('すまん、田中！', '¡Lo siento!', '先輩', 'es-419', [['田中', 'Tanaka']]), ('미안해, 민지야', 'Lo siento, Min-ji', '', 'es-419', []), ('Based on the story', 'Basado en la historia', 'Based on', 'es-419', []), ('No me gusta este país', 'No me gusta este país y tengo sed', 'No me', 'es-419', []), ('', '', '', 'es-419', []), ('UH-HUH.', '¡¡¡¡¡¡', 'UH-HUH', 'es-419', []), ('--DROP DEAD RIGHT?', '—¡¡¡¡¡¡', 'DROP DEAD', 'es-419', []), ('WELL- DUH', 'PUES… —¡¡¡¡', 'WELL DUH', 'es-419', []), ('NO!!!', '¡¡¡NO!!!', 'NO', 'es-419', []), ('...', '…', '', 'es-419', []), ('WHAT?', '¿QUÉ', 'WHAT', 'es-419', []), ('YOU SEE, MY FATHER WAS WORKING', 'VEIS, MI PADRE ESTABA TRABAJANDO', 'YOU SEE MY', 'es-419', []), ('THE STAGE', 'EL DAIS', 'THE STAGE', 'es-ES', []), ('MAKE SURE IT\'S DONE', 'ASEGÚRATE DE QUE', 'MAKE SURE', 'es-419', []), ('IF I SEE FIT TO--', 'SI LO CONSIDERO OPORTUNO, PARA…', 'IF I SEE', 'es-419', []), ('AFTER YOU-', 'DESPUÉS DE—', 'AFTER YOU', 'es-419', []), ('AFTER YOU', 'DESPUÉS DE…', 'AFTER YOU', 'es-419', []), ('WHAT A DOG', 'QUÉ PERRO', 'WHAT A', 'es-419', []), ('I WANT TO STUDY HIM AND', 'QUIERO ESTUDIARLO Y', 'I WANT', 'es-419', []), ('SPINF.OS', 'SPINF.OS', 'SPINF', 'es-419', [])]
 
 
 def main() -> None:
@@ -239,10 +283,14 @@ def main() -> None:
         "profiles": {k: list(v) for k, v in P.PROFILES.items()}, "summary_note": P.SUMMARY_NOTE, "flag_enum": P.FLAG_ENUM, "translation_schema": P.TRANSLATION_SCHEMA,
         "review_schema": P.REVIEW_SCHEMA, "refusal_pattern": _REFUSAL.pattern,
         "echo_note": P.ECHO_NOTE, "repair_header": P.REPAIR_HEADER,
+        "recover_header": P.RECOVER_HEADER, "recover_note": P.RECOVER_NOTE,
+        "recover": {"max_segments": P.RECOVER_MAX_SEGMENTS, "attempts": P.RECOVER_ATTEMPTS, "max_tokens": P.RECOVER_MAX_TOKENS},
+        "shorten_header": P.SHORTEN_HEADER, "shorten": {"min_keep": P.SHORTEN_MIN_KEEP, "max_ratio": P.SHORTEN_MAX_RATIO},
         "quality": {"echo_words": Q.ECHO_WORDS, "echo_window": Q.ECHO_WINDOW, "echo_similarity": Q.ECHO_SIMILARITY,
                     "invented_ratio": Q.INVENTED_RATIO, "invented_slack": Q.INVENTED_SLACK, "cjk": Q.CJK, "cjk_weight": Q.CJK_WEIGHT,
                     "vosotros_pattern": Q.VOSOTROS_PATTERN, "issue_text": Q.ISSUE_TEXT, "missing_text": Q.MISSING_TEXT,
-                    "blocking": list(Q.BLOCKING)},
+                    "blocking": list(Q.BLOCKING), "dangling": list(Q.DANGLING), "source_dangling": list(Q.SOURCE_DANGLING), "last_word_pattern": Q._LAST_WORD.pattern,
+                    "cut_end_pattern": Q._CUT_END.pattern},
     }
     # Lo que necesitan las interfaces (PC y móvil) para mostrar los perfiles: nombre y descripción, sin las instrucciones del modelo.
     OUT_PROFILES.write_text(json.dumps({"default": P.DEFAULT_PROFILE, "profiles": [{"id": k, "label": v[0], "description": v[1]} for k, v in P.PROFILES.items()]},
@@ -262,6 +310,14 @@ def main() -> None:
                      "length": [Q.content_length(src), Q.content_length(tr)], "echo_ok": Q.echo_matches(src, echo),
                      "lost": Q.lost_names(src, tr, [tuple(n) for n in names])}
                     for src, tr, echo, var, names in QUALITY_CASES],
+        "fit": _fit_cases(),
+        "salvage": [{"raws": raws, "out": salvage_items(raws)} for raws in (
+            ['{"items": [{"n": 1, "src_start": "A", "translation": "x"}, {"n": 2, "src_start": "B", "translation": "y \\" }'],
+            ['<think>…</think>```json\n{"items": [{"n": 1.0, "src_start": "A", "translation": "{x}"}, {"n": true, "translation": "z"}]}'],
+            ['{"items": [{"n": 3, "translation": 5}, {"n": "4", "translation": "s"}, {"n": 5, "translation": "ok", "src_start": "C"}',
+             '{"items": [{"n": 5, "translation": "otra", "src_start": "C"}, {"n": 6, "translation": "seis", "src_start": "D"}]}'],
+            ['sin items', '{"page_summary": "x"}', '', '{"items": {"n": 1}}'],
+        )],
         "parse_json": [{"raw": r, "out": _try_parse(r)} for r in (
             '{"a": 1}', '```json\n{"a": 2}\n```', '<think>pensando {x}</think>\n{"a": 3}', 'texto antes {"a": 4} texto después',
             '[1, 2]', 'sin json', '{"a": ', '')],
@@ -269,6 +325,36 @@ def main() -> None:
     OUT_CASES.parent.mkdir(parents=True, exist_ok=True)
     OUT_CASES.write_text(json.dumps({"cases": build_cases(), **extra}, ensure_ascii=False) + "\n", encoding="utf-8")
     print("prompts y casos exportados")
+
+
+def _fit_cases() -> list[dict]:
+    """Encaje con métricas reales: globos elípticos, cajas sin globo, tipografías y textos de longitud creciente."""
+    import math
+
+    def ellipse(cx, cy, rx, ry, n=24):
+        return [[int(cx + rx * math.cos(2 * math.pi * k / n)), int(cy + ry * math.sin(2 * math.pi * k / n))] for k in range(n)]
+
+    texts = ["¡SÍ!", "NO ME IMPORTA QUIÉN CREES QUE ERES", "¿QUÉ? ¿ESTÁS ENAMORADO DE ÉL, HARRY?",
+             "LAS COMPAÑÍAS TABACALERAS ESTABAN AÑADIENDO NIVELES ADICTIVOS DE NICOTINA A LOS CIGARRILLOS",
+             "Hola\nque tal", "SUPERCALIFRAGILISTICOEXPIALIDOSO", ""]
+    out = []
+    for (cx, cy, rx, ry) in ((300, 300, 90, 60), (500, 400, 160, 90), (200, 200, 60, 70)):
+        poly = ellipse(cx, cy, rx, ry)
+        box = [cx - int(rx * 0.9), cy - int(ry * 0.85), cx + int(rx * 0.9), cy + int(ry * 0.85)]
+        for t in texts:
+            for role, ls in (("dialogue", 28.0), ("narration", 0.0), ("shout", 40.0)):
+                inp = {"layoutBox": box, "polygon": poly, "lineSize": ls, "pageHeight": 3000, "role": role, "lineHeight": 1.12,
+                       "uppercase": role == "shout"}
+                out.append({"text": t, "input": inp, "fits": F.fits(t, layout_box=tuple(box), polygon=poly, line_size=ls,
+                                                                    page_height=3000, role=role, line_height=1.12,
+                                                                    uppercase=role == "shout")})
+    for t in texts:
+        box = [10, 10, 260, 90]
+        out.append({"text": t, "input": {"layoutBox": box, "polygon": None, "lineSize": 20.0, "pageHeight": 1200, "role": "whisper",
+                                         "lineHeight": 1.3, "uppercase": False},
+                    "fits": F.fits(t, layout_box=tuple(box), polygon=None, line_size=20.0, page_height=1200, role="whisper",
+                                   line_height=1.3)})
+    return out
 
 
 def _try_parse(raw: str):

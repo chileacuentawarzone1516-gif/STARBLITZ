@@ -28,6 +28,7 @@ export const FLAG_LABELS: Record<string, string> = {
   cultural: 'Referencia cultural', ambiguous: 'Ambiguo', ocr_suspect: 'Posible error de OCR',
   too_long: 'Largo para el globo', untranslated: 'Sin traducir', refused: 'El modelo se negó a traducir',
   original_kept: 'Texto original conservado', no_fit: 'No cabe en el globo', ocr_empty: 'El OCR no leyó este texto',
+  condensed: 'Reformulada más corta para que quepa (la versión completa está en la nota)',
 };
 
 /** Qué hace STARBLITZ con cada página mientras procesa el proyecto. */

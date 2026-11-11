@@ -29,16 +29,20 @@ export function makeMeasure(style: TextStyle, ctx: Ctx2D = getMeasureCtx()): Mea
 
 /** Suelo absoluto del cuerpo de letra (fracción de la altura de página): por debajo no se rotula, se conserva el original. */
 export const MIN_FONT_FLOOR = 0.005;
+/** Tope fijo del cuerpo mínimo: 0,72 % de la página (21,6 px en 3 000): el 10 % de la letra de diálogo del propio capítulo de prueba mide ≤ 22 px, así que sigue dentro de lo que el original ya usa; con 0,8 % no cabían «¿POR QUÉ?», «¿SEÑOR?»… (2026-11-10). */
+export const MIN_FONT_CAP = 0.0072;
 /** Cuánto puede bajar la letra respecto al cuerpo del texto ORIGINAL: si el original se leía a ese tamaño, la traducción también. */
 export const MIN_FONT_VS_ORIGINAL = 0.75;
 /** Papel con tipografía condensada que se prueba cuando el texto no cabe con la suya. */
 export const CONDENSED_ROLE: FontRole = 'narration';
+/** Margen interior (en cuerpos de letra) contra el contorno del globo en el último intento; el normal es 0,28. */
+export const TIGHT_BUBBLE_PADDING = 0.14;
 
 export function sizeBounds(region: Region, page: Pick<Page, 'height'>): { min: number; max: number } {
   const role = FONT_ROLES[region.style.font] ?? FONT_ROLES.dialogue;
   // Antes el mínimo era fijo (0,8 % de la página, 24 px en una página de 3 000 px), mayor que el rotulado condensado de un cómic
   // occidental: un 36 % de los textos no cabía (medido el 2026-11-09). Ahora puede bajar hasta el 75 % del cuerpo original.
-  const fixed = Math.max(8, page.height * 0.008);
+  const fixed = Math.max(8, page.height * MIN_FONT_CAP);
   const relative = region.line_size > 0 ? region.line_size * MIN_FONT_VS_ORIGINAL : fixed;
   const min = Math.max(8, page.height * MIN_FONT_FLOOR, Math.min(fixed, relative));
   const [, y1, , y2] = region.layout_box;
@@ -73,6 +77,17 @@ export function layoutRegion(region: Region, page: Pick<Page, 'height'>): Layout
   if (!result.fits && s.size == null && s.font !== CONDENSED_ROLE) {
     const condensed = attempt({ ...s, font: CONDENSED_ROLE });
     if (condensed.fits) result = { ...condensed, font: CONDENSED_ROLE };
+  }
+  // Último recurso en un globo: margen interior más estrecho contra el contorno (sin bajar la letra del mínimo legible). Los
+  // rotulistas llenan los globos casi hasta el borde; el margen normal (0,28 del cuerpo) dejaba fuera textos que sí caben.
+  if (!result.fits && s.size == null && region.bubble) {
+    for (const font of s.font === CONDENSED_ROLE ? [s.font] : [s.font, CONDENSED_ROLE]) {
+      const tight = layoutText({
+        text: region.translation, box: region.layout_box, polygon: region.bubble.polygon, fontSize: null, minSize: min, maxSize: max,
+        lineHeight: s.line_height, align: s.align, uppercase: s.uppercase, padding: TIGHT_BUBBLE_PADDING, padBox: false,
+      }, makeMeasure({ ...s, font }));
+      if (tight.fits) { result = font === s.font ? tight : { ...tight, font }; break; }
+    }
   }
   if (layoutCache.size > 2000) layoutCache.clear();
   layoutCache.set(key, result);

@@ -15,7 +15,9 @@ import { VisionService } from '../../src/engine/vision/service';
 import { splitLines } from '../../src/engine/vision/regions';
 import { decodeToGray } from '../../src/engine/runtime/cv';
 import { zipSync } from 'fflate';
-import { layoutRegion, loadLetteringFonts, regionFits, renderPage, type Page } from '@starblitz/shared';
+import {
+  CONDENSED_ROLE, layoutRegion, layoutText, loadLetteringFonts, makeMeasure, regionFits, renderPage, sizeBounds, type Page,
+} from '@starblitz/shared';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { BrowserImageCodec } from '../../src/engine/importers/codec';
 import { hamming } from '../../src/engine/importers/formats';
@@ -180,6 +182,34 @@ const api = {
     const candidates = page.regions.filter((r) => r.render && r.translation.trim() && !r.flags.includes('original_kept')); // misma regla que renderPage
     const notFit = candidates.filter((r) => !regionFits(r, page)).map((r) => ({ id: r.id, bbox: r.bbox, text: r.translation, size: layoutRegion(r, page).fontSize }));
     return { png: await blobToDataUrl(blob), ms, drawn: stats.drawn, kept_original: stats.keptOriginal.length, not_fit: notFit };
+  },
+
+  /**
+   * Diagnóstico de los textos que no caben: tamaño de letra que necesitarían frente al mínimo permitido, caja, globo y longitud.
+   * Sirve para clasificar las causas (caja estrecha, traducción larga, palabra sin corte posible) con datos y no a ojo.
+   */
+  async fitReport(pageJsonUrl: string) {
+    await loadLetteringFonts();
+    const page = await (await fetch(pageJsonUrl)).json() as Page;
+    const out = [];
+    for (const r of page.regions) {
+      if (!r.render || !r.translation.trim() || r.flags.includes('original_kept') || regionFits(r, page)) continue;
+      const { min, max } = sizeBounds(r, page);
+      const style = { ...r.style, font: CONDENSED_ROLE };
+      const measure = makeMeasure(style);
+      const base = { text: r.translation, box: r.layout_box, polygon: r.bubble ? r.bubble.polygon : null, fontSize: null, maxSize: max,
+        lineHeight: style.line_height, align: style.align, uppercase: style.uppercase, padding: r.bubble ? 0.28 : 0.15, padBox: !r.bubble };
+      let needed = 0;
+      for (let s = min; s >= 4; s -= 0.5) { if (layoutText({ ...base, minSize: s, maxSize: s + 0.01 }, measure).fits) { needed = s; break; } }
+      const words = r.translation.split(/\s+/).filter(Boolean);
+      const longest = words.reduce((a, w) => (w.length > a.length ? w : a), '');
+      const [x1, y1, x2, y2] = r.layout_box, [bx1, by1, bx2, by2] = r.bbox;
+      out.push({ id: r.id, kind: r.kind, font: r.style.font, bubble: !!r.bubble, min, line_size: r.line_size, needed,
+        box: [x2 - x1, y2 - y1], bbox: [bx2 - bx1, by2 - by1], src: r.source_text, tr: r.translation,
+        src_len: r.source_text.length, tr_len: r.translation.length, longest, longest_w: measure(longest.toUpperCase(), min),
+        width_at_min: measure(r.translation.toUpperCase(), min) });
+    }
+    return out;
   },
 
   /** Detector EXPERIMENTAL (PP-OCRv6 Manga) sobre una imagen: líneas, bloques y máscara, para compararlo con el motor Python. */

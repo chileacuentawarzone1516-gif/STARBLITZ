@@ -20,10 +20,12 @@ from dataclasses import dataclass, field
 from ..core.settings import TranslationSettings
 from ..projects.schema import Character, GlossaryEntry, Page, Project, Region
 from . import quality
-from .llm import ChatMessage, LLMClient
+from .fit import fit_chars, region_fits
+from .llm import ChatMessage, InvalidJSONError, LLMClient, salvage_items
 from .prompts import (
-    DEFAULT_PROFILE, ECHO_NOTE, HONORIFICS, KIND_LABELS, LANG_NAMES, PROFILES, REPAIR_HEADER, REVIEW_SCHEMA, REVIEWER_SYSTEM,
-    SUMMARY_NOTE, TRANSLATION_SCHEMA, TRANSLATOR_SYSTEM, VARIANTS,
+    DEFAULT_PROFILE, ECHO_NOTE, HONORIFICS, KIND_LABELS, LANG_NAMES, PROFILES, RECOVER_ATTEMPTS, RECOVER_HEADER, RECOVER_MAX_SEGMENTS,
+    RECOVER_MAX_TOKENS, RECOVER_NOTE, REPAIR_HEADER, REVIEW_SCHEMA, REVIEWER_SYSTEM, SHORTEN_HEADER, SHORTEN_MAX_RATIO,
+    SHORTEN_MIN_KEEP, SUMMARY_NOTE, TRANSLATION_SCHEMA, TRANSLATOR_SYSTEM, VARIANTS,
 )
 
 log = logging.getLogger(__name__)
@@ -49,6 +51,11 @@ class PageTranslation:
     characters: list[Character] = field(default_factory=list)
     reviewed: int = 0
     repaired: int = 0  # textos que necesitaron la llamada de reparación (desalineados, inventados, «vosotros», nombres)
+    json_invalid: int = 0  # respuestas del modelo que no eran JSON válido ni tras su reintento
+    salvaged: int = 0      # textos rescatados de una respuesta rota (completos y con el eco de SU original)
+    recovered: int = 0     # textos recuperados pidiéndolos uno a uno tras una respuesta rota
+    json_lost: int = 0     # textos que se quedaron sin traducción por respuestas rotas (conservan el original)
+    condensed: int = 0     # traducciones sustituidas por una reformulación más corta porque no cabían en su globo
 
 
 class ContextualTranslator:
@@ -88,26 +95,45 @@ class ContextualTranslator:
                      "Úsala para identificar quién habla, a quién y con qué emoción.\n")
         user += f"\nDevuelve un elemento en «items» por cada número traducible. {ECHO_NOTE} En «page_summary»: {SUMMARY_NOTE}"
 
-        result = self.client.chat_json(
-            [ChatMessage("system", system), ChatMessage("user", user, images=[image_jpeg] if image_jpeg else [])],
-            TRANSLATION_SCHEMA, model=self.model, cancel=cancel,
-        )
+        stats = {"json_invalid": 0, "salvaged": 0, "recovered": 0, "condensed": 0}
+        broken = False
+        try:
+            result = self.client.chat_json(
+                [ChatMessage("system", system), ChatMessage("user", user, images=[image_jpeg] if image_jpeg else [])],
+                TRANSLATION_SCHEMA, model=self.model, cancel=cancel,
+            )
+        except InvalidJSONError as exc:
+            # Una respuesta ilegible ya no hace fallar la página: se rescatan los textos completos que sí llegaron y el resto
+            # se pide uno a uno (`_recover`). Lo que no se consiga conserva el original.
+            log.warning("Página %s: respuesta JSON inválida%s; se recupera por textos.", page.index + 1,
+                        " (cortada por el tope de tokens)" if exc.truncated else "")
+            broken = True
+            stats["json_invalid"] += 1
+            result = {"items": salvage_items(exc.raws), "new_terms": [], "characters": [], "page_summary": ""}
         by_n = {int(it.get("n", -1)): it for it in result.get("items", []) if isinstance(it, dict)}
 
         drafts: dict[str, dict] = {}
         for r in targets:
             item = by_n.get(numbering[r.id])
-            if item:
+            # De una respuesta rota solo vale un texto con el eco de SU original (la estructura ya no garantiza el orden).
+            if item and (not broken or quality.echo_matches(r.source_text, str(item.get("src_start", ""))) is True):
                 drafts[r.id] = item
+        stats["salvaged"] = len(drafts) if broken else 0
 
         names = quality.known_names(project.characters, effective_glossary(project, self.s.dictionary))
-        repaired = self._repair(project, page, targets, numbering, drafts, names, system,
-                                self._context_block(project, page, prev_page, None, story, compact=True), cancel)
+        compact = self._context_block(project, page, prev_page, None, story, compact=True)
+        tried: set[str] = set()
+        if broken:
+            tried = self._recover(project, page, [r for r in targets if r.id not in drafts], numbering, drafts, names, system,
+                                  compact, cancel, stats)
+        repaired = self._repair(project, page, [r for r in targets if r.id not in tried], numbering, drafts, names, system,
+                                compact, cancel, stats)
 
         reviewed = 0
         if self.s.quality == "max" and drafts:
             reviewed = self._review(project, page, targets, numbering, drafts, user_context=self._context_block(
-                project, page, prev_page, None, story, compact=True), cancel=cancel)
+                project, page, prev_page, None, story, compact=True), cancel=cancel, stats=stats)
+        self._shorten(project, page, targets, numbering, drafts, names, compact, cancel, stats)
 
         updated: list[Region] = []
         for r in targets:
@@ -116,7 +142,11 @@ class ContextualTranslator:
             if not item or not str(item.get("translation", "")).strip():
                 region.flags = sorted(set(region.flags) | {"untranslated"})
                 region.status = "review"
-                region.note = region.note or "El modelo no devolvió traducción para este texto."
+                if r.id in tried:
+                    region.note = ("El modelo devolvió una respuesta ilegible y este texto no se pudo recuperar: se conserva el "
+                                   "original. Vuelve a traducirlo o escríbelo a mano.")
+                else:
+                    region.note = region.note or "El modelo no devolvió traducción para este texto."
                 updated.append(region)
                 continue
             text = _clean(str(item.get("final") or item["translation"]))
@@ -148,6 +178,10 @@ class ContextualTranslator:
             region.note = str(item.get("note", ""))[:500]
             region.review_note = str(item.get("issue", ""))[:300]
             region.ocr_fix = str(item.get("source_fix", ""))[:400] if "ocr_suspect" in flags else ""
+            if item.get("condensed_from"):
+                flags.add("condensed")
+                full = f"Versión completa (no cabía en el globo): {item['condensed_from']}"
+                region.note = (f"{region.note} · {full}" if region.note else full)[:500]
             region.confidence = confidence
             if r.max_chars and len(text) > r.max_chars * 1.35:
                 flags.add("too_long")
@@ -166,14 +200,110 @@ class ContextualTranslator:
                 gender = c.get("gender") if c.get("gender") in ("m", "f", "n", "?") else "?"
                 characters.append(Character(source=str(c["source"]).strip()[:80], target=str(c.get("target", "")).strip()[:80],
                                             gender=gender, speech=str(c.get("speech", ""))[:200]))
+        json_lost = sum(1 for r in targets if r.id in tried and r.id not in drafts)
         return PageTranslation(updated=updated, summary=str(result.get("page_summary", ""))[:600],
                                new_terms=[t for t in new_terms if t.source and t.target and t.source.lower() not in own_terms],
                                characters=characters,
-                               reviewed=reviewed, repaired=repaired)
+                               reviewed=reviewed, repaired=repaired, json_invalid=stats["json_invalid"],
+                               salvaged=stats["salvaged"], recovered=stats["recovered"], json_lost=json_lost,
+                               condensed=stats["condensed"])
+
+    # ------------------------------------------------------------------
+    def _shorten(self, project: Project, page: Page, targets: list[Region], numbering: dict[str, int], drafts: dict[str, dict],
+                 names: list[tuple[str, str]], user_context: str, cancel: threading.Event | None, stats: dict[str, int]) -> None:
+        """Reformulación breve de las traducciones que no caben en su globo al cuerpo mínimo legible (`fit.region_fits`, con las
+        métricas reales de las tipografías).
+
+        Una sola llamada por página. La versión corta solo sustituye a la anterior si CABE, es de verdad más corta, conserva la
+        mayor parte del contenido (no es un resumen), no pierde nombres propios y no tiene problemas nuevos (desalineada, inventada,
+        «vosotros»). La versión completa queda en la nota del texto y se marca «condensed» para revisarla."""
+        long_ones: list[tuple[Region, str, int]] = []
+        for r in targets:
+            d = drafts.get(r.id)
+            if not d:
+                continue
+            text = _clean(str(d.get("final") or d.get("translation", "")))
+            if not text or _REFUSAL.search(text):
+                continue
+            shown = quality.match_case(r.source_text, text)  # se rotula con las mayúsculas del original
+            if not region_fits(r, shown, page.height):
+                target = fit_chars(r, shown, page.height)
+                # Si cabe menos del mínimo de contenido que se exige, acortarlo sería resumirlo: no se pide (se conserva el original).
+                if target >= len(text) * SHORTEN_MIN_KEEP:
+                    long_ones.append((r, text, target))
+        if not long_ones:
+            return
+        variant_name, variant_rules = VARIANTS[project.target_variant]
+        system = REVIEWER_SYSTEM.format(variant_name=variant_name, variant_rules=variant_rules, profile_rules=_profile_rules(project))
+        lines = [f"[{numbering[r.id]}] (máx. ~{target} caracteres; ahora {len(text)})\n  ORIGINAL: {r.source_text}\n"
+                 f"  TRADUCCIÓN: {text}" for r, text, target in long_ones]
+        user = (user_context + "\n\n" + SHORTEN_HEADER.format(page=page.index + 1) + "\n" + "\n".join(lines)
+                + "\n\nDevuelve un elemento por línea con la versión final.")
+        try:
+            result = self.client.chat_json([ChatMessage("system", system), ChatMessage("user", user)], REVIEW_SCHEMA,
+                                           model=self.model, temperature=0.2, cancel=cancel)
+        except Exception as exc:  # acortar es una mejora: si falla se conserva la traducción completa
+            from ..core.errors import CancelledError
+
+            if isinstance(exc, CancelledError):
+                raise
+            if isinstance(exc, InvalidJSONError):
+                stats["json_invalid"] += 1
+            log.warning("Fallo al acortar textos de la página %s: %s", page.index + 1, exc)
+            return
+        by_n = {_as_int(it.get("n")): it for it in result.get("items", []) if isinstance(it, dict)}
+        for r, text, _target in long_ones:
+            it = by_n.get(numbering[r.id])
+            short = _clean(str(it.get("final", ""))) if it else ""
+            if not _acceptable_short(r.source_text, text, short, project.target_variant, names):
+                continue
+            if not region_fits(r, quality.match_case(r.source_text, short), page.height):
+                continue  # más corta pero sigue sin caber: no compensa cambiar el texto
+            d = drafts[r.id]
+            d["final"] = short
+            d["condensed_from"] = text
+            stats["condensed"] += 1
+
+    # ------------------------------------------------------------------
+    def _recover(self, project: Project, page: Page, missing: list[Region], numbering: dict[str, int], drafts: dict[str, dict],
+                 names: list[tuple[str, str]], system: str, user_context: str, cancel: threading.Event | None,
+                 stats: dict[str, int]) -> set[str]:
+        """Tras una respuesta rota, pide cada texto que faltó por separado (con su número y el eco de su original).
+
+        Cada texto tiene `RECOVER_ATTEMPTS` intentos con un tope de tokens bajo; se acepta solo un elemento con SU número, una
+        traducción no vacía y sin problemas que impidan usarla (desalineado, inventado). Devuelve los ids intentados: no vuelven
+        a la llamada de reparación (los reintentos están acotados)."""
+        tried: set[str] = set()
+        for r in missing[:RECOVER_MAX_SEGMENTS]:
+            tried.add(r.id)
+            n = numbering[r.id]
+            user = (user_context + "\n\n" + RECOVER_HEADER.format(page=page.index + 1) + "\n"
+                    + f"[{n}] ({KIND_LABELS.get(r.kind, r.kind)}, máx. ~{r.max_chars} caracteres) {r.source_text}\n"
+                    + "\n" + RECOVER_NOTE.format(n=n, echo=ECHO_NOTE))
+            for _attempt in range(RECOVER_ATTEMPTS):
+                try:
+                    res = self.client.chat_json([ChatMessage("system", system), ChatMessage("user", user)], TRANSLATION_SCHEMA,
+                                                model=self.model, cancel=cancel, max_tokens=RECOVER_MAX_TOKENS)
+                    items = [it for it in res.get("items", []) if isinstance(it, dict)]
+                except InvalidJSONError as exc:
+                    stats["json_invalid"] += 1
+                    items = salvage_items(exc.raws)
+                item = next((it for it in items if _as_int(it.get("n")) == n), None)
+                if item is None or not str(item.get("translation", "")).strip():
+                    continue
+                issues = quality.check(r.source_text, _clean(str(item["translation"])), str(item.get("src_start", "")),
+                                       project.target_variant, names)
+                if any(i in quality.BLOCKING for i in issues):
+                    continue
+                drafts[r.id] = item
+                stats["recovered"] += 1
+                break
+        return tried
 
     # ------------------------------------------------------------------
     def _repair(self, project: Project, page: Page, targets: list[Region], numbering: dict[str, int], drafts: dict[str, dict],
-                names: list[tuple[str, str]], system: str, user_context: str, cancel: threading.Event | None) -> int:
+                names: list[tuple[str, str]], system: str, user_context: str, cancel: threading.Event | None,
+                stats: dict[str, int] | None = None) -> int:
         """Una sola llamada para los textos con problemas (sin traducción, desalineados, inventados, «vosotros», nombres).
 
         La respuesta nueva solo sustituye a la anterior si ya no tiene problemas que impidan usarla. Devuelve cuántos textos
@@ -195,9 +325,14 @@ class ContextualTranslator:
             user += f"[{numbering[r.id]}] ({KIND_LABELS.get(r.kind, r.kind)}, máx. ~{r.max_chars} caracteres) {r.source_text}\n"
             user += f"  Problema: {problem}\n"
         user += f"\nDevuelve un elemento en «items» por cada número de esta lista. {ECHO_NOTE} En «page_summary» deja una cadena vacía."
+        strict = False
         try:
             result = self.client.chat_json([ChatMessage("system", system), ChatMessage("user", user)], TRANSLATION_SCHEMA,
                                            model=self.model, cancel=cancel)
+        except InvalidJSONError as exc:  # respuesta rota: se aprovecha lo completo que traiga el eco de SU original
+            if stats is not None:
+                stats["json_invalid"] += 1
+            result, strict = {"items": salvage_items(exc.raws)}, True
         except Exception as exc:  # la reparación es una mejora: si falla, deciden las comprobaciones finales
             from ..core.errors import CancelledError
 
@@ -210,6 +345,8 @@ class ContextualTranslator:
             it = by_n.get(numbering[r.id])
             if not it or not str(it.get("translation", "")).strip():
                 continue
+            if strict and quality.echo_matches(r.source_text, str(it.get("src_start", ""))) is not True:
+                continue
             text = _clean(str(it["translation"]))
             again = quality.check(r.source_text, text, str(it.get("src_start", "")), project.target_variant, names)
             if not any(i in quality.BLOCKING for i in again):
@@ -218,7 +355,8 @@ class ContextualTranslator:
 
     # ------------------------------------------------------------------
     def _review(self, project: Project, page: Page, targets: list[Region], numbering: dict[str, int],
-                drafts: dict[str, dict], user_context: str, cancel: threading.Event | None) -> int:
+                drafts: dict[str, dict], user_context: str, cancel: threading.Event | None,
+                stats: dict[str, int] | None = None) -> int:
         variant_name, variant_rules = VARIANTS[project.target_variant]
         system = REVIEWER_SYSTEM.format(variant_name=variant_name, variant_rules=variant_rules, profile_rules=_profile_rules(project))
         lines = []
@@ -239,6 +377,8 @@ class ContextualTranslator:
 
             if isinstance(exc, CancelledError):
                 raise
+            if isinstance(exc, InvalidJSONError) and stats is not None:
+                stats["json_invalid"] += 1
             log.warning("Fallo en la revisión editorial de la página %s: %s", page.index + 1, exc)
             return 0
         by_n = {int(it.get("n", -1)): it for it in result.get("items", []) if isinstance(it, dict)}
@@ -334,10 +474,12 @@ def estimate_max_chars(layout_box: tuple[int, int, int, int], line_size: float, 
     """Caracteres que caben con un cuerpo de letra legible (≈ el del original)."""
     x1, y1, x2, y2 = layout_box
     w, h = max(1, x2 - x1), max(1, y2 - y1)
-    # Mismo cuerpo mínimo que el maquetador (`sizeBounds`: 0,8 % de la altura de página). Antes se suponía 1,3 %, más grande que el
-    # rotulado original de un cómic occidental: el límite salía ~2,5 veces menor de lo que cabe y «too_long» saltaba en 7 de cada
-    # 10 textos (medido el 2026-11-09).
-    font = max(line_size * 0.8, page_height * 0.008, 11.0)
+    # EXACTAMENTE el cuerpo mínimo del maquetador (`sizeBounds` en `typeset/render.ts`): hasta el 75 % del cuerpo original, nunca
+    # por debajo del 0,5 % de la página ni por encima del 0,8 %. Antes se tomaba el MAYOR de los dos (un cuerpo más grande que el
+    # mínimo real), así que la capacidad salía corta y la reformulación breve se habría pedido de más (2026-11-10).
+    fixed = max(8.0, page_height * 0.0072)  # = fit.MIN_FONT_CAP
+    relative = line_size * 0.75 if line_size > 0 else fixed
+    font = max(8.0, page_height * 0.005, min(fixed, relative))
     fill = 0.62 if in_bubble else 0.8  # los globos elípticos aprovechan menos superficie
     per_line = max(1.0, w * 0.9 / (font * 0.55))
     lines = max(1.0, h * 0.9 / (font * 1.15))
@@ -349,6 +491,27 @@ def _clean(text: str) -> str:
     text = text.replace("...", "…")
     text = re.sub(r"[ \t]+", " ", text)
     return text.strip()
+
+
+def _acceptable_short(source: str, text: str, short: str, variant: str, names: list[tuple[str, str]]) -> bool:
+    """¿La reformulación corta puede sustituir a la traducción? Más corta, sin perder la mayor parte del contenido, sin perder
+    nombres y sin problemas nuevos. Lo que no se pueda comprobar automáticamente (matices) lo revisa la persona (nota)."""
+    if not short or _REFUSAL.search(short) or len(short) > len(text) * SHORTEN_MAX_RATIO:
+        return False
+    if quality.content_length(short) < quality.content_length(text) * SHORTEN_MIN_KEEP:
+        return False
+    if quality.ends_dangling(short) and not quality.ends_dangling(text):
+        return False  # «Después de usted—» → «Después de—»: pierde el sentido aunque conserve letras
+    before = set(quality.check(source, text, "", variant, names))
+    after = set(quality.check(source, short, "", variant, names))
+    return not (after - before)
+
+
+def _as_int(v) -> int | None:
+    """Número de texto de un elemento: entero (o real sin decimales); cualquier otra cosa no vale."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != int(v):
+        return None
+    return int(v)
 
 
 def _clamp(v) -> float:

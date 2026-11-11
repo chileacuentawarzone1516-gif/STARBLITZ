@@ -37,6 +37,13 @@ describe('cajas de rotulado solapadas', () => {
     expect(c.layout_box).toEqual([90, 90, 210, 210]);
   });
 
+  it('textos que apenas se rozan: corte por el centro del solape (igual que Python)', () => {
+    const a = region('a', [98, 2017, 226, 2109], [97, 2017, 254, 2113], true);
+    const b = region('b', [217, 2018, 374, 2139], [159, 2018, 374, 2142], true);
+    expect(separateLayouts([a, b], 3000)).toBe(2);
+    expect([a.layout_box[2], b.layout_box[0]]).toEqual([221, 221]);
+  });
+
   it('textos apilados: corte horizontal', () => {
     const a = region('a', [100, 100, 300, 140], [80, 80, 320, 260]);
     const b = region('b', [110, 200, 290, 240], [80, 160, 320, 300]);

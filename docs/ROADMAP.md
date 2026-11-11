@@ -43,7 +43,9 @@ Detalle y estado por etapa en [MOTOR-AUDITORIA](MOTOR-AUDITORIA.md), [MODELOS-IN
 | PLaMo 3 Translate | retirado del código (D3: no autorizado) |
 | Calidad de traducción: eco, desalineación, invención, es-419, nombres, una llamada de reparación | 🧪 implementado (PC y móvil, con paridad) y medido con el capítulo real ([EVALUACION-CORPUS-USM](EVALUACION-CORPUS-USM.md) §11) |
 | Rotulado: globos ajustados, cajas sin solapes, letra mínima relativa, tipografía condensada, original restaurado si no cabe | 🧪 implementado y medido (146 → 51 textos que no caben; 77 → 21 solapes) |
-| Alternativa cuando el modelo devuelve JSON inválido dos veces (hoy la página entera falla y conserva el original) | ⏳ |
+| Recuperación ante JSON inválido (rescate + textos uno a uno; ya no falla la página ni se detiene el capítulo en el móvil) | 🧪 implementado (PC y móvil, con paridad) y medido en ejecuciones reales: 6 respuestas cortadas, 0 textos perdidos ([EVALUACION-CORPUS-USM](EVALUACION-CORPUS-USM.md) §12) |
+| Globos llenos de texto, color de la letra, encaje con métricas reales de las tipografías y reformulación breve | 🧪 implementado y medido (§12) |
+| Modelo de traducción mejor para PC con GPU | 🧪 comparados Qwen3.5-9B y Gemma 4 E4B/12B en la RTX 4060; recomendación con datos: Gemma 4 E4B ([MODELOS-INVESTIGACION](MODELOS-INVESTIGACION.md)); ⏳ evaluación humana y decisión del titular |
 | Segundo plano en Android (servicio en primer plano) | ⏳ diseño (no implementado) |
 | Estilo visual del texto | ⏳ diseño |
 | Actualizador integrado | 🧪 comparación de versiones y validación del manifiesto; ⏳ descarga e instalación (decisiones pendientes) |
