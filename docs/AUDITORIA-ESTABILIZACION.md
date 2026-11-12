@@ -73,3 +73,15 @@ errores · vitest shared 30/30, mobile 274/274, desktop 6/6 · pytest 131 OK, 19
 prueba; las ejecuta CI) · `scripts/ci/verificar-repo.sh` OK. No ejecutado en local: E2E de Chromium, autoprueba Java (no hay
 JDK), compilación del APK y del instalador (los hace CI). **Nada probado en un teléfono ni en un instalador ejecutado por una
 persona.** Resultados de CI: ver el informe de la fase en el Vault y el CHANGELOG.
+
+### Resultados de CI sobre `afde93b`
+
+| Workflow | Ejecución | Resultado | Qué demuestra |
+|---|---|---|---|
+| `ci` #11 (lanzado por el push: nuevo disparador `test/**`) | 43146777321 | ✅ | Integridad; pytest en Linux con el detector real (incluye los E2E de la API que en local se omiten); guarda de paridad de los 4 exportadores; tipos de toda la interfaz y de Electron main/preload; vitest shared + mobile + desktop; autoprueba Java; E2E de la app móvil en Chromium con detector y OCR reales (incluida la medida del almacenamiento con IndexedDB real) |
+| `android` #11 | 43146866286 | ✅ | APK release arm64 firmado con clave **desechable**, verificación estática 25/25 PASS. APK SHA-256 `8d4817975675eeb61d64ab01f5c260613b4f054c3d64b5c41531845792f08962` (artefacto 7 días). **No instalado en ningún teléfono.** |
+| `windows` #2 | 43146897857 | ✅ | Compilación con los SHA-256 nuevos (Electron, Python embebido, NSIS, llama.cpp) y las dependencias fijadas; en Windows Server 2025 del runner: instalación silenciosa, motor embebido arranca, `/api/health` y `/api/system` (DirectML + CPU), API rechaza peticiones sin token, solo escucha en 127.0.0.1, la app sigue abierta a los 30 s, desinstalación conserva los datos. Instalador SHA-256 `e7040564e9bca0e770d6aa6838e7239b21afb7674d2d6b74c16f27e800cb92c7`. **No probado por una persona en este PC (SmartScreen, GPU, aspecto).** |
+
+`build.yml` (con la verificación nueva del APK) no se lanzó: solo se usa al preparar una Release, que no forma parte de esta fase.
+Avisos de GitHub (no fallos): las acciones fijadas apuntan a Node.js 20 (obsoleto, se fuerza Node 24) y `setup-java@v4` está
+obsoleta → actualizar los SHA fijados en una tarea de mantenimiento.
