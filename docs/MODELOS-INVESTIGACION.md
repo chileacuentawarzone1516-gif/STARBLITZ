@@ -1,5 +1,8 @@
 # Investigación de modelos de OCR y traducción
 
+> **Actualización 2026-11-12:** investigación de candidatos nuevos (PC y Android), licencias verificadas, benchmark común y diseño de los
+> dos apartados en [MODELOS-TRADUCCION-PC-ANDROID](MODELOS-TRADUCCION-PC-ANDROID.md). Lo de abajo queda como registro de las fases anteriores.
+
 > **PLaMo retirado del código (2026-11-09, D3 no autorizado).** STARBLITZ ya no reconoce, busca, describe, instala ni usa
 > PLaMo 3 Translate (bloqueo en `apps/shared/src/llm/hf.ts` y `engine/starblitz_engine/llm/hf.py`; el procesador rechaza un PLaMo ya
 > instalado). Las medidas de PLaMo que aparecen abajo son un **registro histórico** del benchmark del 2026-11-08, no una opción.
