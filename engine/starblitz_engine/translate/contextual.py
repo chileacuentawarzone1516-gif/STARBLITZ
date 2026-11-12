@@ -110,7 +110,7 @@ class ContextualTranslator:
             broken = True
             stats["json_invalid"] += 1
             result = {"items": salvage_items(exc.raws), "new_terms": [], "characters": [], "page_summary": ""}
-        by_n = {int(it.get("n", -1)): it for it in result.get("items", []) if isinstance(it, dict)}
+        by_n = {_item_n(it.get("n")): it for it in result.get("items", []) if isinstance(it, dict)}
 
         drafts: dict[str, dict] = {}
         for r in targets:
@@ -251,7 +251,7 @@ class ContextualTranslator:
                 stats["json_invalid"] += 1
             log.warning("Fallo al acortar textos de la página %s: %s", page.index + 1, exc)
             return
-        by_n = {_as_int(it.get("n")): it for it in result.get("items", []) if isinstance(it, dict)}
+        by_n = {_item_n(it.get("n")): it for it in result.get("items", []) if isinstance(it, dict)}
         for r, text, _target in long_ones:
             it = by_n.get(numbering[r.id])
             short = _clean(str(it.get("final", ""))) if it else ""
@@ -340,7 +340,7 @@ class ContextualTranslator:
                 raise
             log.warning("Fallo en la reparación de la página %s: %s", page.index + 1, exc)
             return len(bad)
-        by_n = {int(it.get("n", -1)): it for it in result.get("items", []) if isinstance(it, dict)}
+        by_n = {_item_n(it.get("n")): it for it in result.get("items", []) if isinstance(it, dict)}
         for r, _problem in bad:
             it = by_n.get(numbering[r.id])
             if not it or not str(it.get("translation", "")).strip():
@@ -381,7 +381,7 @@ class ContextualTranslator:
                 stats["json_invalid"] += 1
             log.warning("Fallo en la revisión editorial de la página %s: %s", page.index + 1, exc)
             return 0
-        by_n = {int(it.get("n", -1)): it for it in result.get("items", []) if isinstance(it, dict)}
+        by_n = {_item_n(it.get("n")): it for it in result.get("items", []) if isinstance(it, dict)}
         changed = 0
         for r in targets:
             d, rev = drafts.get(r.id), by_n.get(numbering[r.id])
@@ -509,9 +509,17 @@ def _acceptable_short(source: str, text: str, short: str, variant: str, names: l
 
 def _as_int(v) -> int | None:
     """Número de texto de un elemento: entero (o real sin decimales); cualquier otra cosa no vale."""
-    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != int(v):
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")) or v != int(v):
         return None
     return int(v)
+
+
+def _item_n(v) -> int | None:
+    """Número de un elemento de la respuesta. Antes ``int(it.get("n", -1))``: un ``null`` tumbaba la página entera y un
+    ``2.7`` llevaba la traducción al globo 2. Se aceptan enteros, reales sin decimales y cifras entre comillas."""
+    if isinstance(v, str) and re.fullmatch(r"\s*[0-9]+\s*", v):
+        return int(v.strip())
+    return _as_int(v)
 
 
 def _clamp(v) -> float:

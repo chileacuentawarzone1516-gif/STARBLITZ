@@ -14,8 +14,13 @@ row INFO emulador "API $API · ABIs: $ABIS · $(adb shell getprop ro.product.mod
 adb logcat -c
 if adb install -r -t "$APK" > "$OUT/install.txt" 2>&1; then row PASS "instalación (adb install)" "$(tr -d '\r' < "$OUT/install.txt" | tail -1)"
 else
-  row LIMITE "instalación (adb install)" "$(tr -d '\r' < "$OUT/install.txt" | tail -2 | tr '\n' ' ') — si es NO_MATCHING_ABIS, la imagen x86_64 no admite arm64: límite del emulador, hay que probar en un teléfono arm64"
-  echo "_Sin instalación no hay más pruebas en este emulador._" >> "$R"; exit 0
+  # Solo NO_MATCHING_ABIS es un límite del emulador (x86_64 sin traducción ARM); cualquier otro rechazo es un fallo del APK.
+  if grep -q "NO_MATCHING_ABIS" "$OUT/install.txt"; then
+    row LIMITE "instalación (adb install)" "$(tr -d '\r' < "$OUT/install.txt" | tail -2 | tr '\n' ' ') — la imagen x86_64 no admite arm64: límite del emulador, hay que probar en un teléfono arm64"
+    echo "_Sin instalación no hay más pruebas en este emulador._" >> "$R"; exit 0
+  fi
+  row FAIL "instalación (adb install)" "$(tr -d '\r' < "$OUT/install.txt" | tail -2 | tr '\n' ' ')"
+  echo "_Sin instalación no hay más pruebas en este emulador._" >> "$R"; exit 1
 fi
 adb shell dumpsys package $PKG | grep -E "^\s+(android.permission\.[A-Z_]+): granted=true" | sed 's/^ *//' > "$OUT/permisos-concedidos.txt"
 row INFO "permisos concedidos" "$(tr '\n' ' ' < "$OUT/permisos-concedidos.txt")"
@@ -31,6 +36,6 @@ JS=$(grep -E "Capacitor/Console|chromium.*CONSOLE" "$OUT/logcat.txt" | grep -iE 
 [ -z "$JS" ] && row PASS "sin errores de JavaScript en el WebView" "consola limpia" || { row FAIL "sin errores de JavaScript en el WebView" "$JS"; FAIL=1; }
 adb exec-out screencap -p > "$OUT/captura-inicio.png"; row INFO captura "captura-inicio.png ($(stat -c %s "$OUT/captura-inicio.png") bytes)"
 adb shell input keyevent KEYCODE_HOME; sleep 2; adb shell am start -n $PKG/.MainActivity >/dev/null 2>&1; sleep 5
-[ -n "$(adb shell pidof $PKG | tr -d '\r')" ] && row PASS "vuelve a primer plano sin reiniciarse" "proceso vivo tras Home + reabrir" || row FAIL "vuelve a primer plano sin reiniciarse" "no hay proceso"
+[ -n "$(adb shell pidof $PKG | tr -d '\r')" ] && row PASS "vuelve a primer plano sin reiniciarse" "proceso vivo tras Home + reabrir" || { row FAIL "vuelve a primer plano sin reiniciarse" "no hay proceso"; FAIL=1; }
 echo >> "$R"; echo "_Emulador: no sustituye la prueba en un teléfono arm64 real (llama.cpp nativo, batería, temperatura, RAM)._" >> "$R"
 exit $FAIL

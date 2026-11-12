@@ -431,10 +431,14 @@ def create_app(svc: Services, ui_dir: Path | None = None) -> FastAPI:
                     page = svc.store.add_page(project, img.data, img.ext, img.name, img.width, img.height, img.sha1, img.dhash, dup)
                     return page.id
 
-                report = ingest(uploads, existing, capacity, add, lambda p, m: ctx.update(p, message=m))
-                if project.cover_page_id is None and project.page_ids:
-                    project.cover_page_id = project.page_ids[0]
-                svc.store.save(project)
+                try:
+                    report = ingest(uploads, existing, capacity, add, lambda p, m: ctx.update(p, message=m))
+                finally:
+                    # Aunque la importación falle a mitad, las páginas ya escritas quedan registradas en el proyecto
+                    # (antes quedaban huérfanas en el disco y el proyecto sin ellas).
+                    if project.cover_page_id is None and project.page_ids:
+                        project.cover_page_id = project.page_ids[0]
+                    svc.store.save(project)
             result = report.to_dict()
             result["limit"] = svc.settings.value.processing.max_pages
             return result
@@ -659,7 +663,8 @@ def _llm_overview(svc: Services) -> dict:
         external = {"base_url": cfg.llm.base_url, "ok": health.get("ok", False), "models": names}
     return {**summary, "runtime": svc.runtime.status(), "installed_models": installed,
             "advice": advisor.advise(hw, svc.library, summary["active"] or "", cfg.processing.profile),
-            "installing": svc.library.installing(), "hf_token_set": bool(cfg.llm.hf_token), "external": external}
+            "installing": svc.library.installing(), "incomplete": svc.library.incomplete(),
+            "hf_token_set": bool(cfg.llm.hf_token), "external": external}
 
 
 def _accelerator(providers: list[str], device: str) -> dict:

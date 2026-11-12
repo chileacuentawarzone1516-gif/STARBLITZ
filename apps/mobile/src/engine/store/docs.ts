@@ -134,8 +134,19 @@ export class IdbStorage implements DocStorage {
     await done(tx);
   }
   async blobBytes(prefix: string): Promise<number> {
+    // De uno en uno con un cursor: antes `getAll` cargaba a la vez TODAS las imágenes de todos los proyectos (cientos de MB
+    // o GB) solo para sumar tamaños al abrir Configuración, con riesgo de que el WebView se cerrara por falta de memoria.
     const { os } = await this.store('blobs', 'readonly');
-    const all = (await req(os.getAll(range(prefix)))) as StoredBlob[];
-    return all.reduce((n, b) => n + b.data.byteLength, 0);
+    return new Promise<number>((resolve, reject) => {
+      let total = 0;
+      const cursorReq = os.openCursor(range(prefix));
+      cursorReq.onsuccess = () => {
+        const cur = cursorReq.result;
+        if (!cur) { resolve(total); return; }
+        total += (cur.value as StoredBlob).data.byteLength;
+        cur.continue();
+      };
+      cursorReq.onerror = () => reject(cursorReq.error);
+    });
   }
 }

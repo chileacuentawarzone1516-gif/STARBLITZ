@@ -23,4 +23,6 @@ export interface LlmRuntime {
   acquire(modelId: string, signal?: AbortSignal): Promise<LlmLease>;
   status(): Promise<RuntimeStatus>;
   unload(): Promise<RuntimeStatus>;
+  /** ¿Hay alguna petición en curso? (activar o borrar un modelo no debe cortarla). */
+  inUse?(): boolean;
 }

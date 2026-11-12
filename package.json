@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "typecheck": "npm run typecheck -w @starblitz/shared && npm run typecheck -w @starblitz/desktop && npm run typecheck -w @starblitz/mobile",
-    "test": "npm test -w @starblitz/shared && npm test -w @starblitz/mobile",
+    "test": "npm test -w @starblitz/shared && npm test -w @starblitz/mobile && npm test -w @starblitz/desktop",
     "build:desktop": "npm run build -w @starblitz/desktop",
     "build:mobile": "npm run build -w @starblitz/mobile",
     "e2e:mobile": "npm run e2e -w @starblitz/mobile"

@@ -45,7 +45,13 @@ jobs:
         with: { node-version: '22', cache: npm }
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
         with: { packages: 'platform-tools' }
-      - run: bash tools/prepare_ppocr.sh
+      - name: Plataforma y herramientas de compilación de Android (aapt2/apksigner para la verificación)
+        run: sdkmanager --install "platforms;android-35" "build-tools;34.0.0" "build-tools;35.0.0" "platform-tools" > /dev/null
+      - name: OCR PP-OCR (PyPI + SHA-256) e integridad de las bibliotecas de llama.cpp arm64
+        run: |
+          bash tools/prepare_ppocr.sh
+          cd apps/mobile/android/app/src/main/jniLibs/arm64-v8a
+          sha256sum -c "$GITHUB_WORKSPACE/apps/mobile/android/app/vendor/llama-libs.sha256"
       - run: npm ci
       - name: Web + sincronización Capacitor
         working-directory: apps/mobile
@@ -74,8 +80,13 @@ jobs:
             ./gradlew --no-daemon assembleDebug
             cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/STARBLITZ-android.apk"
           fi
-      - name: Comprobar que existe el APK (si falta, el job falla)
-        run: test -s STARBLITZ-android.apk && ls -l STARBLITZ-android.apk
+      # El APK que release.yml pone en el borrador pasa la MISMA verificación estática que android.yml (firma, ABIs,
+      # permisos, sin gancho E2E, dependencias nativas). Antes solo se comprobaba que existiera.
+      - name: Verificación estática del APK
+        run: |
+          test -s STARBLITZ-android.apk
+          bash scripts/ci/verificar-apk.sh STARBLITZ-android.apk informe-apk
+          cat informe-apk/apk-verificacion.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: STARBLITZ-Android

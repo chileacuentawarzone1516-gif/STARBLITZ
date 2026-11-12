@@ -104,7 +104,21 @@ function createMainWindow(info: EngineInfo) {
     if (!mainWindow) return;
     writePrefs({ ...readPrefs(), bounds: mainWindow.getNormalBounds(), maximized: mainWindow.isMaximized() });
   };
-  mainWindow.on('close', saveBounds);
+  // Antes la ventana se cerraba sin dejar a la interfaz guardar las ediciones diferidas (450 ms): la última se perdía.
+  // Ahora se pide a la interfaz que guarde y se cierra al confirmar (o a los 5 s si no responde).
+  let closeReady = false;
+  let closing = false;
+  mainWindow.on('close', (event) => {
+    saveBounds();
+    if (closeReady || !mainWindow) return;
+    event.preventDefault();
+    if (closing) return;
+    closing = true;
+    const finish = () => { closeReady = true; ipcMain.removeAllListeners('app:flushed'); mainWindow?.close(); };
+    const timer = setTimeout(finish, 5000);
+    ipcMain.once('app:flushed', () => { clearTimeout(timer); finish(); });
+    mainWindow.webContents.send('app:flush-before-close');
+  });
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
@@ -167,16 +181,23 @@ async function boot() {
     isPackaged: app.isPackaged,
     dataDir: dataDir(),
     onExit: async (code) => {
-      const choice = await dialog.showMessageBox({
-        type: 'error', title: 'STARBLITZ',
-        message: 'El motor local se ha detenido inesperadamente.',
-        detail: `Código de salida: ${code}. Tus proyectos están guardados. ¿Quieres reiniciarlo?`,
-        buttons: ['Reiniciar motor', 'Cerrar STARBLITZ'], defaultId: 0,
-      });
-      if (choice.response === 0) {
-        const info = await engine!.start();
-        mainWindow?.loadURL(`${process.env.STARBLITZ_DEV_URL || info.url}/`);
-      } else app.quit();
+      // Antes un reinicio fallido quedaba como promesa rechazada sin tratar: sin aviso y con la ventana colgada.
+      let detail = `Código de salida: ${code}. Tus proyectos están guardados. ¿Quieres reiniciarlo?`;
+      for (;;) {
+        const choice = await dialog.showMessageBox({
+          type: 'error', title: 'STARBLITZ',
+          message: 'El motor local se ha detenido inesperadamente.',
+          detail, buttons: ['Reiniciar motor', 'Cerrar STARBLITZ'], defaultId: 0,
+        });
+        if (choice.response !== 0) { app.quit(); return; }
+        try {
+          const info = await engine!.start();
+          mainWindow?.loadURL(`${process.env.STARBLITZ_DEV_URL || info.url}/`);
+          return;
+        } catch (err) {
+          detail = `No se pudo reiniciar el motor: ${(err as Error).message}\n\nTus proyectos están guardados. ¿Intentarlo de nuevo?`;
+        }
+      }
     },
   });
   try {

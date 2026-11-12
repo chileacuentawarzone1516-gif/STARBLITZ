@@ -1,7 +1,7 @@
 import { Download } from 'lucide-react';
 import { exportPages, formatBytes, type ExportFormat, type Page, type Project } from '@starblitz/shared';
 import { useState } from 'react';
-import { pageBitmap } from '../components/images';
+import { ownedPageBitmap } from '../components/images';
 import { Progress, Sheet } from '../components/ui';
 import { clearExportCache, saveExports } from '../lib/exportFile';
 import { reportError, toast, useApp } from '../state/app';
@@ -20,8 +20,8 @@ export function ExportSheet({ project, pages }: { project: Project; pages: Page[
     try {
       const files = await exportPages(pages, {
         format, imageFormat: 'jpg', quality: 0.92, baseName: project.name,
-        loadBase: async (p) => (await pageBitmap(project.id, p, 'base'))!,
-        loadOriginal: (p) => pageBitmap(project.id, p, 'original'),
+        loadBase: async (p) => { const b = await ownedPageBitmap(project.id, p, 'base'); if (!b) throw new Error(`Falta la imagen de la página ${p.index + 1}`); return b; },
+        loadOriginal: (p) => ownedPageBitmap(project.id, p, 'original'),
         onProgress: (d, t) => setProgress(d / t),
       });
       const saved = await saveExports(files, { share: true });

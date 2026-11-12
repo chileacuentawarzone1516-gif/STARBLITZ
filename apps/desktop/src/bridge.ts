@@ -10,6 +10,7 @@ export interface DesktopBridge {
   openExternal(url: string): Promise<void>;
   openDataDir(sub?: 'logs'): Promise<string>;
   saveFiles(files: { name: string; data: ArrayBuffer }[], kind: string): Promise<{ saved: string[] }>;
+  onFlushBeforeClose?(flush: () => Promise<void>): void;
 }
 
 export const bridge: DesktopBridge | null = (window as unknown as { starblitz?: DesktopBridge }).starblitz ?? null;

@@ -5,6 +5,7 @@
  */
 import { create } from 'zustand';
 import { History, type BBox, type Page, type Project, type Region, type RegionPatch } from '@starblitz/shared';
+import { undoSnapshot } from '../memory';
 import { client, reportError } from '../store';
 
 export type ViewMode = 'translated' | 'original' | 'compare';
@@ -35,44 +36,57 @@ interface EditorState {
   markClean(pageId: string, stale: boolean): void;
 }
 
-const pending = new Map<string, { pid: string; gid: string; rid: string; patch: RegionPatch; timer: ReturnType<typeof setTimeout> }>();
+type SaveJob = { pid: string; gid: string; rid: string; patch: RegionPatch; timer: ReturnType<typeof setTimeout> };
+type SetState = (fn: (s: EditorState) => Partial<EditorState>) => void;
+const pending = new Map<string, SaveJob>();
+const RETRY_MS = 4000;
+let setRef: SetState | null = null;
 
-function scheduleSave(pid: string, gid: string, rid: string, patch: RegionPatch, set: (fn: (s: EditorState) => Partial<EditorState>) => void) {
+/** Programa la escritura diferida de un cambio (se agrupa con los que lleguen antes de `delay`). */
+function scheduleSave(pid: string, gid: string, rid: string, patch: RegionPatch, delay = 450) {
   const key = `${gid}/${rid}`;
   const prev = pending.get(key);
   if (prev) clearTimeout(prev.timer);
   const merged = { ...(prev?.patch ?? {}), ...patch };
-  const timer = setTimeout(async () => {
-    pending.delete(key);
-    set((s) => ({ saving: s.saving + 1 }));
-    try {
-      await client().updateRegion(pid, gid, rid, merged);
-    } catch (e) {
-      reportError(e, 'No se pudo guardar el cambio');
-    } finally {
-      set((s) => ({ saving: s.saving - 1 }));
-    }
-  }, 450);
+  const timer = setTimeout(() => { pending.delete(key); void send({ pid, gid, rid, patch: merged }); }, delay);
   pending.set(key, { pid, gid, rid, patch: merged, timer });
 }
 
-/** Fuerza el guardado de los cambios pendientes (al cambiar de página o salir). */
+/**
+ * Envía un cambio al motor. Si falla (motor caído o reiniciándose), el cambio VUELVE a la cola y se reintenta: antes se
+ * descartaba y la pantalla lo seguía mostrando como guardado. Lo escrito después tiene prioridad sobre lo reintentado.
+ */
+async function send(job: Omit<SaveJob, 'timer'>): Promise<boolean> {
+  setRef?.((s) => ({ saving: s.saving + 1 }));
+  try {
+    await client().updateRegion(job.pid, job.gid, job.rid, job.patch);
+    return true;
+  } catch (e) {
+    reportError(e, 'No se pudo guardar el cambio: se reintentará');
+    const key = `${job.gid}/${job.rid}`;
+    const newer = pending.get(key);
+    if (newer) clearTimeout(newer.timer);
+    scheduleSave(job.pid, job.gid, job.rid, { ...job.patch, ...(newer?.patch ?? {}) }, RETRY_MS);
+    return false;
+  } finally {
+    setRef?.((s) => ({ saving: s.saving - 1 }));
+  }
+}
+
+/** Fuerza el guardado de los cambios pendientes (al cambiar de página, salir o cerrar la ventana). */
 export async function flushPending(): Promise<void> {
   const jobs = [...pending.values()];
   pending.clear();
-  await Promise.all(jobs.map(async (j) => {
-    clearTimeout(j.timer);
-    try { await client().updateRegion(j.pid, j.gid, j.rid, j.patch); } catch (e) { reportError(e); }
-  }));
+  for (const j of jobs) clearTimeout(j.timer);
+  await Promise.all(jobs.map((j) => send(j)));
 }
 
-function pick(region: Region, patch: RegionPatch): RegionPatch {
-  const out: Record<string, unknown> = {};
-  for (const k of Object.keys(patch)) out[k] = structuredClone((region as unknown as Record<string, unknown>)[k]);
-  return out as RegionPatch;
-}
+/** Cambios aún sin confirmar por el motor (para pruebas y para avisar antes de cerrar). */
+export function pendingCount(): number { return pending.size; }
+
 
 export const useEditor = create<EditorState>((set, get) => {
+  setRef = set;
   const mutateRegion = (gid: string, rid: string, patch: RegionPatch) => {
     set((s) => ({
       pages: s.pages.map((p) => p.id !== gid ? p : {
@@ -84,7 +98,7 @@ export const useEditor = create<EditorState>((set, get) => {
       }),
     }));
     const pid = get().project?.id;
-    if (pid) scheduleSave(pid, gid, rid, patch, set);
+    if (pid) scheduleSave(pid, gid, rid, patch);
     if (patch.erase !== undefined || patch.bbox !== undefined) get().markClean(gid, true);
   };
 
@@ -121,7 +135,7 @@ export const useEditor = create<EditorState>((set, get) => {
       const page = get().pages[get().pageIndex];
       const region = page?.regions.find((r) => r.id === regionId);
       if (!page || !region) return;
-      const before = pick(region, patch);
+      const before = undoSnapshot(region, patch) as RegionPatch;
       const gid = page.id;
       mutateRegion(gid, regionId, patch);
       get().history.push({

@@ -458,13 +458,13 @@ export class Processor {
         image = await this.d.vision.annotate((await store.image(projectId, pid, 'original'))!, page.regions.map((r) => r.bbox));
       }
       const earlier = allIds.slice(0, idx).filter((p) => story.has(p)).map((p) => story.get(p)!);
+      const seen = snapshotRegions(page.regions);
       const result = await translator.translatePage(project, page, { prevPage, nextPage, story: earlier, imageJpeg: image, signal: ctx.signal });
       let summary = '';
       await store.mutate(projectId, async () => {
         const proj = await store.get(projectId);
         const fresh = await store.getPage(projectId, pid);
-        const byId = new Map(result.updated.map((r) => [r.id, r]));
-        fresh.regions = fresh.regions.map((r) => byId.get(r.id) ?? r);
+        fresh.regions = mergeUnchanged(fresh.regions, result.updated, seen);
         fresh.summary = result.summary || fresh.summary;
         if (fresh.status === 'imported' || fresh.status === 'analyzed') fresh.status = 'translated';
         await store.savePage(projectId, fresh);
@@ -575,19 +575,12 @@ export class Processor {
         await caches.ocr.put(key, { regions: res.regions, panels: res.panels, ocrEngine: res.ocrEngine } satisfies CachedAnalysis);
       }
     }
-    // Se conservan los textos que la persona ya revisó si siguen en el mismo sitio.
-    const keep = page.regions.filter((r) => r.status === 'approved' || r.status === 'edited');
-    for (const r of res.regions) {
-      for (const old of keep) {
-        if (iou(r.bbox, old.bbox) > 0.6) {
-          r.translation = old.translation; r.status = old.status; r.style = old.style; r.speaker = old.speaker;
-        }
-      }
-    }
     await store.putImage(project.id, page.id, 'mask', res.mask);
     return store.mutate(project.id, async () => {
       const fresh = await store.getPage(project.id, page.id);
-      Object.assign(fresh, { regions: res.regions, panels: res.panels, status: 'analyzed', error: '', ocr_engine: res.ocrEngine, has_clean: false });
+      // Lo que la persona ya revisó se conserva (con la página recién leída: incluye lo editado durante el análisis).
+      const keep = fresh.regions.filter((r) => r.status === 'approved' || r.status === 'edited');
+      Object.assign(fresh, { regions: keepReviewed(res.regions, keep), panels: res.panels, status: 'analyzed', error: '', ocr_engine: res.ocrEngine, has_clean: false });
       await store.savePage(project.id, fresh);
       return fresh;
     });
@@ -630,19 +623,23 @@ export class Processor {
     if (idx < 0) throw new NotFoundError('la página');
     const prevPage = idx > 0 ? await store.getPage(projectId, project.page_ids[idx - 1]) : null;
     const nextPage = idx + 1 < project.page_ids.length ? await store.getPage(projectId, project.page_ids[idx + 1]) : null;
-    const story = (await store.pages(project)).map((p) => p.summary).filter(Boolean).slice(0, idx);
+    // Solo páginas ANTERIORES (antes se filtraba y luego se cortaba: con un resumen vacío entraban páginas posteriores).
+    const story = (await store.pages(project)).slice(0, idx).map((p) => p.summary).filter(Boolean);
+    const seen = snapshotRegions(page.regions);
     const subset = structuredClone(page);
     for (const r of subset.regions) if (regionIds.includes(r.id)) r.status = 'pending';
     let image: Uint8Array | null = null;
     if (await this.useVision()) image = await this.d.vision.annotate((await store.image(projectId, pageId, 'original'))!, page.regions.map((r) => r.bbox));
     const result = await (await this.translator()).translatePage(project, subset, { prevPage, nextPage, story, imageJpeg: image, signal });
     const wanted = new Map(result.updated.filter((r) => regionIds.includes(r.id)).map((r) => [r.id, r]));
+    let applied = new Set<string>();
     await store.mutate(projectId, async () => {
       const fresh = await store.getPage(projectId, pageId);
-      fresh.regions = fresh.regions.map((r) => wanted.get(r.id) ?? r);
+      fresh.regions = mergeUnchanged(fresh.regions, [...wanted.values()], seen);
+      applied = new Set(fresh.regions.filter((r) => wanted.get(r.id) === r).map((r) => r.id));
       await store.savePage(projectId, fresh);
     });
-    return [...wanted.values()];
+    return [...wanted.values()].filter((r) => applied.has(r.id));
   }
 
   // -- etapa 3: limpieza ----------------------------------------------------
@@ -681,6 +678,42 @@ async function mustImage(store: ProjectStore, pid: string, gid: string, kind: 'o
   const blob = await store.image(pid, gid, kind);
   if (!blob) throw new NotFoundError('la imagen');
   return blob;
+}
+
+/**
+ * Conserva al volver a analizar los textos ya revisados (`edited`/`approved`). Paridad con `_keep_reviewed` (Python):
+ * si siguen en el mismo sitio, sobre la región nueva (texto original, caja y opciones de borrado/rotulado); si el detector
+ * ya no los encuentra (un globo marcado a mano donde el detector falló), tal cual. Antes se perdían sin aviso.
+ */
+export function keepReviewed(regions: Region[], keep: Region[]): Region[] {
+  const matched = new Set<string>();
+  for (const r of regions) {
+    for (const old of keep) {
+      if (!matched.has(old.id) && iou(r.bbox, old.bbox) > 0.6) {
+        matched.add(old.id);
+        r.translation = old.translation; r.status = old.status; r.style = old.style; r.speaker = old.speaker;
+        r.source_text = old.source_text; r.erase = old.erase; r.render = old.render; r.layout_box = old.layout_box;
+        break;
+      }
+    }
+  }
+  const out = [...regions, ...keep.filter((old) => !matched.has(old.id))];
+  out.forEach((r, i) => { r.order = i; });
+  return out;
+}
+
+/** Estado de cada región al empezar una traducción (paridad con `_snapshot`). */
+export function snapshotRegions(regions: Region[]): Map<string, string> {
+  return new Map(regions.map((r) => [r.id, JSON.stringify(r)]));
+}
+
+/**
+ * Aplica las regiones traducidas solo donde la guardada sigue igual que al empezar (paridad con `_merge_unchanged`):
+ * una edición hecha durante la traducción gana a la del modelo en vez de perderse.
+ */
+export function mergeUnchanged(current: Region[], updated: Region[], seen: Map<string, string>): Region[] {
+  const byId = new Map(updated.map((r) => [r.id, r]));
+  return current.map((r) => (byId.has(r.id) && seen.get(r.id) === JSON.stringify(r) ? byId.get(r.id)! : r));
 }
 
 export function iou(a: readonly number[], b: readonly number[]): number {

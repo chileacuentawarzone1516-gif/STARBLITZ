@@ -12,7 +12,10 @@ OUTFILE="${OUTFILE:-$ROOT/dist/STARBLITZ-Setup-$VERSION.exe}"
 NSIS_HOME="${NSIS_HOME:-$HOME/.cache/electron-builder/nsis/nsis-3.0.4.1}"
 if [ ! -d "$NSIS_HOME" ]; then
   mkdir -p "$(dirname "$NSIS_HOME")"
-  curl -fL -o /tmp/nsis.7z https://github.com/electron-userland/electron-builder-binaries/releases/download/nsis-3.0.4.1/nsis-3.0.4.1.7z
+  curl -fL --retry 4 -o /tmp/nsis.7z https://github.com/electron-userland/electron-builder-binaries/releases/download/nsis-3.0.4.1/nsis-3.0.4.1.7z
+  # La Release de NSIS no publica sumas: este SHA-256 se calculó sobre ese mismo archivo (2026-11-12). Si cambia, se detiene.
+  echo "9877df902530f96357d13a7a31ae2b9df67f48b11ffc9a1700a7c961574ec5fa  /tmp/nsis.7z" | sha256sum -c - >/dev/null \
+    || { echo "El SHA-256 de NSIS no coincide: no se compila el instalador."; rm -f /tmp/nsis.7z; exit 1; }
   # 7za viene con electron-builder (paquete 7zip-bin, instalado por `npm ci`); se resuelve desde la raíz, no desde la carpeta de caché.
   SEVENZ="$(command -v 7za || command -v 7z || node -p "require(require.resolve('7zip-bin', { paths: ['$ROOT'] })).path7za")"
   chmod +x "$SEVENZ" 2>/dev/null || true

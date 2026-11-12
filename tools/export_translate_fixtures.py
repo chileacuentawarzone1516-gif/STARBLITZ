@@ -323,8 +323,18 @@ def main() -> None:
             '[1, 2]', 'sin json', '{"a": ', '')],
     }
     OUT_CASES.parent.mkdir(parents=True, exist_ok=True)
-    OUT_CASES.write_text(json.dumps({"cases": build_cases(), **extra}, ensure_ascii=False) + "\n", encoding="utf-8")
+    # Sin marcas de tiempo: así regenerar sin cambios da un archivo IDÉNTICO y CI puede detectar un JSON desfasado.
+    OUT_CASES.write_text(json.dumps(_no_clock({"cases": build_cases(), **extra}), ensure_ascii=False) + "\n", encoding="utf-8")
     print("prompts y casos exportados")
+
+
+def _no_clock(value):
+    """Pone a 0 las marcas de tiempo («created»/«updated») que el modelo de datos rellena con la hora actual."""
+    if isinstance(value, dict):
+        return {k: (0 if k in ("created", "updated") and isinstance(v, (int, float)) else _no_clock(v)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_no_clock(v) for v in value]
+    return value
 
 
 def _fit_cases() -> list[dict]:

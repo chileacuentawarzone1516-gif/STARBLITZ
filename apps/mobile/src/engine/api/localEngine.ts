@@ -229,7 +229,7 @@ export class LocalEngine {
     return {
       ...summary, runtime: await this.d.runtime.status(), installed_models: installed,
       advice: advise(caps, installed.map((m) => m.id), summary.active ?? '', cfg.processing.profile, true),
-      installing: this.d.library.installing(), hf_token_set: !!cfg.llm.hf_token, external: null,
+      installing: this.d.library.installing(), incomplete: await this.d.library.incomplete(), hf_token_set: !!cfg.llm.hf_token, external: null,
     };
   }
 
@@ -259,7 +259,13 @@ export class LocalEngine {
   }
 
   async removeLLM(id: string) {
-    if ((await this.d.runtime.status()).model === id) await this.d.runtime.unload();
+    if ((await this.d.runtime.status()).model === id) {
+      // Antes se detenía el servidor aunque estuviera traduciendo: la petición fallaba y el procesado abortaba el capítulo.
+      if (this.d.runtime.inUse?.()) {
+        throw new AppError('busy', 'Ese modelo está traduciendo ahora mismo: espera a que termine o cancela el proceso antes de borrarlo.', 409);
+      }
+      await this.d.runtime.unload();
+    }
     await this.d.library.remove(id);
     if (this.settings.llm.model === id) await this.updateSettings({ llm: { model: '' } });
     return { ok: true };
@@ -269,7 +275,9 @@ export class LocalEngine {
     await this.d.library.get(id); // NotFoundError si no está instalado
     await this.updateSettings({ llm: { provider: 'builtin', model: id } });
     const running = (await this.d.runtime.status()).model;
-    if (running && running !== id) await this.d.runtime.unload(); // libera la memoria del anterior; el nuevo se carga al traducir
+    // Libera la memoria del anterior; el nuevo se carga al traducir. Si hay una traducción en curso NO se corta (antes
+    // fallaba la petición y se abortaba el capítulo): el cambio se aplica en la siguiente petición.
+    if (running && running !== id && !this.d.runtime.inUse?.()) await this.d.runtime.unload();
     return { ok: true, active: id };
   }
 

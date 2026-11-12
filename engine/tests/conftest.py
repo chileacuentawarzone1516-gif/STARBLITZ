@@ -66,9 +66,24 @@ def make_fake_llama_dir(directory: Path) -> Path:
     import stat
 
     directory.mkdir(parents=True, exist_ok=True)
-    exe = directory / ("llama-server.exe" if sys.platform == "win32" else "llama-server")
-    exe.write_text(f"#!{sys.executable}\nimport sys\nsys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
-                   "import fake_llama_server\nfake_llama_server.main()\n", encoding="utf-8")
+    body = (f"import sys\nsys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
+            "import fake_llama_server\nfake_llama_server.main()\n")
+    if sys.platform == "win32":
+        # Windows no ejecuta scripts con «#!»: se arma un .exe real con el lanzador de consola de distlib (el mismo
+        # que usa pip para los «console_scripts»): lanzador + línea «#!» con el intérprete + ZIP con __main__.py.
+        import zipfile
+
+        from pip._vendor import distlib
+
+        launcher = (Path(distlib.__file__).parent / "t64.exe").read_bytes()
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("__main__.py", body)
+        shebang = f'#!"{sys.executable}"\n'.encode()
+        (directory / "llama-server.exe").write_bytes(launcher + shebang + archive.getvalue())
+        return directory
+    exe = directory / "llama-server"
+    exe.write_text(f"#!{sys.executable}\n{body}", encoding="utf-8")
     exe.chmod(exe.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
     return directory
 

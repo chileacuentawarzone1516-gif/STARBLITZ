@@ -146,7 +146,10 @@ class LLMLibrary:
             total = sum(f.size for f in todo) or 1
             target = self.root / model_id
             free = shutil.disk_usage(self.root).free
-            need_disk = total * 1.01 + 64 * 1024 * 1024
+            # Lo ya descargado (archivos completos y «.part» de una descarga pausada o cancelada) no vuelve a ocupar
+            # espacio: antes se exigía el tamaño entero y reanudar una descarga casi completa daba «No hay espacio».
+            already = sum(_partial_bytes(target / Path(f.path).name, f.size) for f in todo)
+            need_disk = max(0, total - already) * 1.01 + 64 * 1024 * 1024
             if free < need_disk:
                 raise AppError("disk_full", f"No hay espacio suficiente: se necesitan {need_disk / GIB:.1f} GB libres "
                                             f"y hay {free / GIB:.1f} GB.", 507)
@@ -187,8 +190,31 @@ class LLMLibrary:
         shutil.rmtree(target, ignore_errors=True)
         log.info("Modelo eliminado: %s", model_id)
 
+    def incomplete(self) -> list[dict]:
+        """Descargas sin terminar (carpeta sin manifiesto válido y que no se está descargando ahora): ocupan disco y
+        antes no aparecían en ningún sitio. Se pueden reanudar instalando el mismo archivo o borrar con ``remove``."""
+        ok = {m.id for m in self.installed()}
+        out = []
+        for d in sorted(p for p in self.root.iterdir() if p.is_dir()):
+            if d.name in ok or d.name in self._busy or not _ID_RE.match(d.name):
+                continue
+            size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+            if size:
+                out.append({"id": d.name, "bytes": size})
+        return out
+
     def disk_usage(self) -> int:
-        return sum(m.size for m in self.installed())
+        return sum(m.size for m in self.installed()) + sum(i["bytes"] for i in self.incomplete())
+
+
+def _partial_bytes(dest: Path, size: int) -> int:
+    """Bytes ya presentes de un archivo del modelo: completo (``dest``) o a medias (``dest.part``)."""
+    for p in (dest, dest.with_name(dest.name + ".part")):
+        try:
+            return min(size, p.stat().st_size)
+        except OSError:
+            continue
+    return 0
 
 
 _SHARD_FIRST = re.compile(r"-0*1-of-0*(\d+)\.gguf$")

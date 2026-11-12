@@ -4,7 +4,8 @@ Equivalente exacto de `apps/mobile/src/engine/translate/plain.ts`. El traductor 
 (≈ 1 100 tokens de SALIDA por página de 3–4 globos frente a ≈ 100 pidiendo solo la traducción: ver docs/ARQUITECTURA-TRADUCCION.md).
 Aquí se envía el texto de los globos de la página en UNA llamada y se recupera solo la traducción.
 
-No se sacrifica fidelidad: se mantiene el contexto (glosario obligatorio y últimos diálogos ya traducidos), no se omite nada (lo que
+No se sacrifica fidelidad: se mantiene el glosario obligatorio de la obra (el historial de diálogos previos se calcula pero NO se envía:
+la plantilla de Hy-MT2 no tiene dónde ponerlo; solo lo usaba PLaMo, retirado en D3), no se omite nada (lo que
 falte se vuelve a pedir uno a uno y, si sigue sin traducción, queda marcado, nunca vacío) y una negativa del modelo no se guarda
 como traducción. A cambio no aprende personajes/términos nuevos ni rellena hablante/emoción, y no usa la imagen.
 """

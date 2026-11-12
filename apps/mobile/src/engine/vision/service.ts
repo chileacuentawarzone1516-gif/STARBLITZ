@@ -136,6 +136,8 @@ export class VisionService implements VisionPort {
   /** Los ajustes cambiaron: se vuelve a decidir el modo de reconstrucción y se relee qué modelos opcionales hay. */
   refresh(): void {
     this.inpainter.mode = this.opts.inpaintMode();
+    // Antes se olvidaba la sesión de LaMa sin liberarla: cada cambio de ajustes dejaba ~200 MB en la memoria del worker.
+    void this.lama?.dispose().catch(() => undefined);
     this.lama = undefined;
     for (const e of this.ocr.values()) void e.dispose();
     this.ocr.clear();

@@ -78,6 +78,8 @@ export class NativeLlmRuntime implements LlmRuntime {
 
   private now() { return (this.d.now ?? Date.now)() / 1000; }
 
+  inUse(): boolean { return this.inflight > 0; }
+
   async ready(): Promise<boolean> {
     return (await this.d.host.available()) && (await this.d.library.stored()).length > 0;
   }

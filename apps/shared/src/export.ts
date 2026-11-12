@@ -34,8 +34,11 @@ export interface ExportOptions {
 const MIME: Record<ImageFormat, string> = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
 
 export function safeFileName(name: string): string {
-  const cleaned = name.normalize('NFKC').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim();
-  return (cleaned || 'starblitz').slice(0, 80);
+  // Windows tampoco admite puntos ni espacios al final ni los nombres reservados (CON, NUL, COM1…): «Con.pdf» fallaba.
+  const cleaned = name.normalize('NFKC').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim()
+    .slice(0, 80).replace(/[. ]+$/, '');
+  const safe = cleaned || 'starblitz';
+  return /^(con|prn|aux|nul|com\d|lpt\d)$/i.test(safe) ? `${safe}_` : safe;
 }
 
 export async function renderPageBlob(page: Page, base: CanvasImageSource, format: ImageFormat, quality = 0.92,
@@ -67,10 +70,19 @@ export async function exportPages(pages: Page[], opts: ExportOptions): Promise<E
   for (let i = 0; i < pages.length; i++) {
     if (opts.signal?.aborted) throw new DOMException('Exportación cancelada', 'AbortError');
     const page = pages[i];
+    // `exportPages` es dueña de lo que devuelven los cargadores y lo libera al terminar cada página (también el
+    // original, que antes nunca se cerraba). Por eso los cargadores deben devolver imágenes PROPIAS, nunca las de una
+    // caché compartida con el lector (ver ExportSheet en el móvil).
     const img = await opts.loadBase(page);
-    const original = page.has_clean && opts.loadOriginal ? await opts.loadOriginal(page) : null;
-    const blob = await renderPageBlob(page, img, imgFormat, quality, original);
-    if ('close' in img && typeof img.close === 'function') img.close();
+    let original: ImageBitmap | HTMLImageElement | null = null;
+    let blob: Blob;
+    try {
+      original = page.has_clean && opts.loadOriginal ? await opts.loadOriginal(page) : null;
+      blob = await renderPageBlob(page, img, imgFormat, quality, original);
+    } finally {
+      release(img);
+      release(original);
+    }
     rendered.push({ name: `${String(i + 1).padStart(pad, '0')}.${imgFormat}`, blob, page });
     opts.onProgress?.(i + 1, pages.length + (opts.format === 'pdf' || opts.format === 'zip' ? 1 : 0));
   }
@@ -105,6 +117,10 @@ export async function exportPages(pages: Page[], opts: ExportOptions): Promise<E
   }
 
   return rendered.map((r) => ({ name: `${base} - ${r.name}`, blob: r.blob }));
+}
+
+function release(img: ImageBitmap | HTMLImageElement | null): void {
+  if (img && 'close' in img && typeof img.close === 'function') img.close();
 }
 
 /** pdf-lib solo incrusta JPG y PNG: una página WEBP se recodifica a JPG. */

@@ -99,7 +99,7 @@ describe('motor local del teléfono', () => {
     opened.push({ files, engine });
     const events: EngineEvent[] = [];
     engine.listen((e) => events.push(e));
-    return { engine, storage, vision, llm, files, host, events };
+    return { engine, storage, vision, llm, files, host, events, runtime };
   }
 
   async function wait(e: LocalEngine, id: string, until: (s: string) => boolean = (s) => ['done', 'error', 'cancelled'].includes(s), ms = 20000) {
@@ -538,8 +538,18 @@ describe('motor local del teléfono', () => {
     await expect(r.engine.compareLLMs([])).rejects.toMatchObject({ code: 'invalid_models' });
     await expect(r.engine.compareLLMs(['no-existe'])).rejects.toMatchObject({ code: 'not_found' });
 
-    // Cambiar el modelo activo y eliminar uno
+    // Con una traducción en curso, activar otro modelo NO corta el servidor y borrar el que traduce se rechaza
+    // (antes se detenía llama-server, la petición fallaba y el procesado abortaba el capítulo).
     const other = ids.find((x) => x !== id)!;
+    const lease = await r.runtime.acquire(id);
+    expect((await r.engine.llmRuntime()).model).toBe(id);
+    expect(await r.engine.activateLLM(other)).toMatchObject({ ok: true, active: other });
+    expect((await r.engine.llmRuntime()).model).toBe(id);
+    await expect(r.engine.removeLLM(id)).rejects.toMatchObject({ code: 'busy', status: 409 });
+    lease.release();
+    await r.engine.activateLLM(id);
+
+    // Cambiar el modelo activo y eliminar uno
     expect(await r.engine.activateLLM(other)).toMatchObject({ ok: true, active: other });
     expect((await r.engine.llm()).active).toBe(other);
     await r.engine.removeLLM(other);

@@ -29,6 +29,15 @@ export async function writeBlob(path: string, blob: Blob): Promise<void> {
 
 export interface SavedExport { name: string; location: string; shareUri: string | null }
 
+/**
+ * Ruta del archivo temporal en la carpeta privada. `SafePath` (Java) exige que cada tramo EMPIECE por una letra, cifra o
+ * «_»: un proyecto llamado «(C99) …», «-Prólogo-» o «.hack» se rechazaba y no se podía exportar. El prefijo `e-` lo
+ * garantiza; el nombre visible en Descargas sigue siendo `f.name`.
+ */
+export function exportTempPath(name: string): string {
+  return `exports/e-${name.replace(/[^\w .()+@=,-]/g, '_')}`;
+}
+
 export async function saveExports(files: ExportFile[], opts: { share: boolean }): Promise<SavedExport[]> {
   if (!isAndroidApp()) {
     for (const f of files) {
@@ -41,7 +50,7 @@ export async function saveExports(files: ExportFile[], opts: { share: boolean })
   const native = nativePlugin();
   const out: SavedExport[] = [];
   for (const f of files) {
-    const path = `exports/${f.name.replace(/[^\w .()+@=,-]/g, '_')}`;
+    const path = exportTempPath(f.name);
     await writeBlob(path, f.blob);
     let location = 'Carpeta privada de STARBLITZ';
     try { location = (await native.saveToDownloads({ path, name: f.name, mime: f.blob.type || 'application/octet-stream' })).location; } catch { /* Android 9: solo compartir */ }

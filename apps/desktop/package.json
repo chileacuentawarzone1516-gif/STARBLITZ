@@ -12,6 +12,8 @@
     "build:electron": "node electron/build.mjs",
     "build": "npm run typecheck && npm run build:ui && npm run build:electron",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:electron": "tsc -p tsconfig.electron.json --noEmit",
+    "test": "vitest run",
     "dist:win": "npm run build && electron-builder --win --x64"
   },
   "dependencies": {

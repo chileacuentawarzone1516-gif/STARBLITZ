@@ -123,6 +123,9 @@ await page.waitForSelector('.m-tgt', { timeout: 10000 });
 await page.locator('.m-tgt').fill('Texto corregido a mano'); await page.waitForTimeout(900); await shot('08-editor-region');
 const saved = await page.evaluate(async () => { const e = window.__sb.engine; const p = (await e.projects())[0]; const b = await e.project(p.id); return b.pages[0].regions.some((r) => r.translation === 'Texto corregido a mano' && r.status === 'edited'); });
 check('la edición manual se guarda y marca como editada', saved);
+// Tamaño de los proyectos con IndexedDB real (ahora con un cursor, sin cargar todas las imágenes a la vez).
+const bytes = await page.evaluate(async () => (await window.__sb.engine.storageInfo()).projects_bytes);
+check('el almacenamiento de los proyectos se mide con IndexedDB real', bytes > 0, `${bytes} bytes`);
 
 // 6) Exportación real (ZIP de PNG)
 await page.goto(BASE + '/#/p/' + (await page.evaluate(async () => (await window.__sb.engine.projects())[0].id)));

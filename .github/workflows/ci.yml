@@ -5,7 +5,7 @@ name: ci
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, "test/**"]  # también la rama de trabajo (test/windows-ci): antes sus push no lanzaban CI
   workflow_dispatch:
   workflow_call:
 
@@ -57,10 +57,18 @@ jobs:
       - name: Pruebas del motor
         working-directory: engine
         run: python -m pytest -q
+      - name: Paridad Python → TypeScript (los JSON exportados deben coincidir con lo que genera el código actual)
+        run: |
+          for f in tools/export_glyph_metrics.py tools/export_llm_catalog.py tools/export_translate_fixtures.py tools/export_vision_registry.py; do
+            python "$f" > /dev/null
+          done
+          git diff --exit-code --stat || { echo "::error::Hay JSON exportados desfasados: ejecuta los tools/export_*.py y súbelos."; exit 1; }
       - name: Pruebas y tipos de la interfaz (compartido + móvil)
         run: |
           npm ci
           npm run typecheck
+          # Proceso principal y preload de Electron: antes esbuild los compilaba sin comprobar tipos en ningún sitio.
+          npm run typecheck:electron -w @starblitz/desktop
           npm test
       - name: Pruebas de la parte nativa de Android (JDK, sin Android)
         run: |

@@ -10,6 +10,7 @@ import { DropZone, pickFiles, useImportFlow } from '../components/ImportFlow';
 import { RunPanel } from '../components/RunPanel';
 import { TranslatedThumb } from '../components/TranslatedThumb';
 import { navigate } from '../router';
+import { mergeMemoryEdits } from '../memory';
 import { client, isLive, reportError, useActiveJob, useApp } from '../store';
 
 type Tab = 'pages' | 'memory' | 'settings';
@@ -250,10 +251,21 @@ function MemoryTab({ bundle, onSaved }: { bundle: ProjectBundle; onSaved: () => 
   const [chars, setChars] = useState<Character[]>(bundle.project.characters);
   const [terms, setTerms] = useState<GlossaryEntry[]>(bundle.project.glossary);
   const [dirty, setDirty] = useState(false);
+  // Lo que había al empezar a editar: sirve para distinguir lo que la IA añadió después de lo que el usuario borró.
+  const base = useRef({ chars: bundle.project.characters, terms: bundle.project.glossary });
+  useEffect(() => {
+    if (dirty) return; // sin cambios propios, la pestaña sigue al proyecto (la IA añade términos mientras procesa)
+    setChars(bundle.project.characters); setTerms(bundle.project.glossary);
+    base.current = { chars: bundle.project.characters, terms: bundle.project.glossary };
+  }, [bundle.project.characters, bundle.project.glossary, dirty]);
   const save = async () => {
     try {
+      // Antes se enviaba la lista de la pestaña tal cual y SUSTITUÍA a la del motor: se perdían los personajes y
+      // términos que la IA había añadido durante el procesado desde que se abrió la pestaña.
+      const latest = (await client().project(bundle.project.id)).project;
       await client().updateProject(bundle.project.id, {
-        characters: chars.filter((c) => c.source.trim()), glossary: terms.filter((t) => t.source.trim() && t.target.trim()),
+        characters: mergeMemoryEdits(chars.filter((c) => c.source.trim()), base.current.chars, latest.characters),
+        glossary: mergeMemoryEdits(terms.filter((t) => t.source.trim() && t.target.trim()), base.current.terms, latest.glossary),
       });
       setDirty(false);
       useApp.getState().toast('ok', 'Memoria del proyecto guardada', 'Se aplicará en las próximas traducciones.');

@@ -6,7 +6,8 @@
  * página de 3–4 globos eso son ≈ 1 100 tokens de SALIDA frente a ≈ 100 pidiendo solo la traducción; y generar es lo más lento
  * en un teléfono. Aquí se envía el texto de los globos de la página en UNA llamada y se recupera solo la traducción.
  *
- * Qué NO se sacrifica: el contexto se mantiene (glosario obligatorio de la obra y últimos diálogos ya traducidos), no se omite
+ * Qué NO se sacrifica: el glosario obligatorio de la obra se mantiene (el historial de diálogos previos se calcula pero NO se
+ * envía: la plantilla de Hy-MT2 no tiene dónde ponerlo; solo lo usaba PLaMo, retirado en D3), no se omite
  * nada (si el modelo devuelve menos líneas de las pedidas, lo que falta se vuelve a pedir una a una; si sigue sin traducción
  * queda marcado, nunca vacío) y una negativa del modelo no se guarda como traducción (misma regla que el traductor contextual).
  *

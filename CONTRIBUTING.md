@@ -12,7 +12,7 @@ subirse al repositorio.
 
 ## Entorno de desarrollo
 
-Requisitos: Node.js 20+ (probado con 22) y npm; Python 3.11+ (probado con 3.12 y 3.13); para el APK, JDK 21 y Android
+Requisitos: Node.js 20+ (probado con 22) y npm; Python 3.12+ (probado con 3.12 y 3.14; numpy 2.5 exige 3.12); para el APK, JDK 21 y Android
 SDK 35. Detalle en [docs/COMPILAR.md](docs/COMPILAR.md).
 
 ```bash

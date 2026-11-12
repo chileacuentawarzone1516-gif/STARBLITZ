@@ -354,6 +354,8 @@ export interface LLMOverview extends LLMSummary {
   installed_models: InstalledModel[];
   advice: ModelAdvice;
   installing: string[];
+  /** Descargas sin terminar que ocupan disco: se reanudan instalando el mismo archivo o se borran como un modelo. */
+  incomplete?: { id: string; bytes: number }[];
   hf_token_set: boolean;
   external: { base_url: string; ok: boolean; models: string[] } | null;
 }

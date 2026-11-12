@@ -21,12 +21,30 @@ export function Installed({ llm, reload, goTo }: { llm: LLMOverview; reload: () 
     await act(id, () => client().removeLLM(id));
   };
 
+
+  // Descargas sin terminar: ocupan disco y antes no aparecían en ningún sitio (se reanudan instalando el mismo archivo).
+  const partial = llm.incomplete ?? [];
+  const partialBlock = partial.length > 0 && (
+    <div className="settings-section" role="note">
+      <strong>Descargas sin terminar</strong>
+      <p className="small muted">Ocupan espacio. Se reanudan al volver a instalar el mismo archivo; si no las necesitas, bórralas.</p>
+      {partial.map((p) => (
+        <div className="row" key={p.id} style={{ gap: 8, justifyContent: 'space-between' }}>
+          <span className="small">{p.id} · {formatBytes(p.bytes)}</span>
+          <button className="btn btn-ghost btn-sm" disabled={busy === p.id} onClick={() => remove(p.id, 'la descarga sin terminar', p.bytes)}><Trash2 />Borrar</button>
+        </div>
+      ))}
+    </div>
+  );
   if (!models.length) {
     return (
-      <EmptyState icon={<Zap />} title="Aún no hay un modelo de traducción"
-        action={<button className="btn btn-primary" onClick={() => goTo('recommended')}>Ver los recomendados para este equipo</button>}>
-        STARBLITZ traduce con un modelo que se ejecuta en este dispositivo. Descárgalo una vez y funcionará sin Internet.
-      </EmptyState>
+      <div className="stack">
+        <EmptyState icon={<Zap />} title="Aún no hay un modelo de traducción"
+          action={<button className="btn btn-primary" onClick={() => goTo('recommended')}>Ver los recomendados para este equipo</button>}>
+          STARBLITZ traduce con un modelo que se ejecuta en este dispositivo. Descárgalo una vez y funcionará sin Internet.
+        </EmptyState>
+        {partialBlock}
+      </div>
     );
   }
   return (
@@ -58,6 +76,7 @@ export function Installed({ llm, reload, goTo }: { llm: LLMOverview; reload: () 
             </div>
           ))}
         </div>
+        {partialBlock}
         {llm.runtime.running && (
           <div className="row">
             <span className="small muted">El modelo está cargado y ocupa memoria; se descarga solo tras {llm.runtime.idle_s ? 'un rato' : 'unos minutos'} sin uso.</span>

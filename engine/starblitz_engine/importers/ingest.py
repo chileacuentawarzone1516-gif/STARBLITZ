@@ -16,6 +16,7 @@ import io
 import logging
 import re
 import zipfile
+import zlib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -101,8 +102,10 @@ def load_image(name: str, data: bytes) -> ImportedImage:
         raise ValueError("la imagen es demasiado grande") from exc
     except Exception as exc:
         raise ValueError("la imagen está dañada o incompleta") from exc
-    oriented = ImageOps.exif_transpose(img)
-    needs_reencode = oriented is not img or img.mode not in ("RGB", "L") or kind == "webp" and getattr(img, "is_animated", False)
+    # exif_transpose devuelve SIEMPRE una copia: comparar objetos recodificaba a PNG todos los JPG (3-5x más espacio).
+    rotated = img.getexif().get(0x0112, 1) not in (None, 1)
+    oriented = ImageOps.exif_transpose(img) if rotated else img
+    needs_reencode = rotated or img.mode not in ("RGB", "L") or kind == "webp" and getattr(img, "is_animated", False)
     if needs_reencode:
         rgb = oriented.convert("RGB")
         buf = io.BytesIO()
@@ -147,8 +150,14 @@ def iter_zip(name: str, data: bytes) -> Iterator[tuple[str, bytes | Exception]]:
                 if ext not in {"txt", "xml", "json", "nfo", "db", "ini", "url"}:
                     yield entry.name, ValueError("formato no admitido dentro del ZIP")
                 continue
-            with zf.open(info) as fh:
-                payload = fh.read(MAX_ENTRY_BYTES + 1)
+            try:
+                with zf.open(info) as fh:
+                    payload = fh.read(MAX_ENTRY_BYTES + 1)
+            except (zipfile.BadZipFile, zlib.error, NotImplementedError, EOFError, OSError, RuntimeError) as exc:
+                # Una entrada dañada (CRC, deflate roto, método no admitido) ya no tumba toda la importación.
+                log.warning("Entrada dañada en %s: %s (%s)", name, entry, exc)
+                yield entry.name, ValueError("archivo dañado dentro del ZIP")
+                continue
             yield str(entry), payload
 
 

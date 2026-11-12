@@ -11,6 +11,27 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y 
 Primera versión del código. **No hay ninguna Release publicada**: antes de publicarla deben completarse y documentarse
 las pruebas de [docs/PRUEBAS-HARDWARE.md](docs/PRUEBAS-HARDWARE.md).
 
+### Corregido (auditoría de estabilización — 2026-11-12)
+
+Detalle, causas raíz y pendientes en [docs/AUDITORIA-ESTABILIZACION.md](docs/AUDITORIA-ESTABILIZACION.md).
+
+- **Pérdida de datos:** las ediciones hechas durante una traducción ya no se sobrescriben (PC y móvil); volver a analizar conserva
+  lo revisado aunque el detector no lo encuentre; un ZIP con una entrada dañada importa el resto; un ajuste no válido ya no borra
+  todos los ajustes (diccionario y token) y un `settings.json` truncado ya no impide arrancar; cerrar la ventana guarda lo
+  pendiente y los guardados fallidos se reintentan; guardar la «Memoria» ya no borra lo que la IA añadió mientras tanto.
+- **Android:** la exportación ya no cierra imágenes que usa el lector (segunda exportación y páginas en blanco); nombres de
+  proyecto que empiezan por «(», «-» o «.» ya se exportan; LaMa se libera al cambiar ajustes; activar o borrar un modelo ya no corta
+  una traducción en curso; Configuración ya no carga todas las imágenes en memoria.
+- **Traducción:** `"n": null` o decimal en la respuesta ya no tumba la página ni lleva el texto al globo equivocado (paridad
+  Python ↔ TS); «Cancelar» corta al momento las peticiones a Ollama y servidores externos; el contexto de «Retraducir» ya no
+  incluye páginas posteriores; «Probar la traducción» ya no caduca a los 30 s.
+- **Modelos:** reanudar una descarga descuenta lo ya bajado al comprobar el espacio; las descargas sin terminar aparecen, cuentan
+  en el disco y se pueden borrar.
+- **Importación:** los JPG ya no se recodifican a PNG (3–5× más disco) salvo que la orientación EXIF lo exija.
+- **Compilación y CI:** SHA-256 de Electron, Python embebido y NSIS; dependencias del motor fijadas; el APK de `build.yml` pasa la
+  verificación estática; CI en la rama de trabajo, tipos de Electron, guarda de paridad de los 4 exportadores y pruebas de la app de
+  escritorio; las pruebas del servidor de modelos funcionan en Windows; Python mínimo 3.12 (lo exige numpy 2.5).
+
 ### Corregido (fase 3: robustez, calidad de traducción y reconstrucción — 2026-11-10)
 
 - **Respuesta JSON inválida del modelo:** antes hacía fallar la página entera en el PC y, en el móvil, detenía **todo el capítulo**
@@ -91,7 +112,7 @@ las pruebas de [docs/PRUEBAS-HARDWARE.md](docs/PRUEBAS-HARDWARE.md).
   (no integrado: falta validar precisión con páginas reales). Parámetros térmicos **sin calibrar** y sin medir en el teléfono. Ver [docs/OPTIMIZACION-ANDROID.md](docs/OPTIMIZACION-ANDROID.md).
 
 - **Traducción en texto plano por lotes (móvil y PC):** `PlainTranslator` para modelos de traducción dedicados (Hy-MT2; el soporte de PLaMo se retiró el 2026-11-09, D3): una llamada por
-  página con el formato nativo del modelo, glosario e historial como contexto, reintento solo de lo que falte y nada vacío ni aceptado si el modelo se niega.
+  página con el formato nativo del modelo, glosario como contexto (el historial de diálogos solo lo usaba PLaMo, retirado), reintento solo de lo que falte y nada vacío ni aceptado si el modelo se niega.
   Medido en PC: el formato actual cuesta ~1 070 tokens de entrada y ~350 de salida por página con Qwen3.5-4B; en texto plano, ~200 y ~45; con PLaMo-0.8B, ~55 y ~42.
   Los demás modelos siguen con el traductor contextual. Catálogo: añadido Hy-MT2-1.8B (Apache-2.0); sin cambiar el modelo recomendado.
 - **Banco de pruebas de traducción** (`tools/bench`): corpus inventado ja/ko de 56 segmentos en 10 categorías, arnés reproducible y resultados crudos;

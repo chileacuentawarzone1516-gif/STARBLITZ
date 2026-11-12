@@ -27,24 +27,31 @@ const fonts = loadLetteringFonts().then(() => { fontsReady = true; }, () => { fo
 
 const bitmapCache = new Map<string, Promise<ImageBitmap | null>>();
 
-/** Página completa como bitmap (original o reconstruida), con una caché pequeña para el lector y la exportación. */
+/**
+ * Página completa como bitmap (original o reconstruida) para el LECTOR, con una caché pequeña. Las imágenes de la caché
+ * pueden estar en pantalla: nunca se cierran al desalojarlas (el recolector las libera cuando nadie las usa). Antes se
+ * cerraban y la exportación también las cerraba: dibujar un bitmap cerrado lanza `InvalidStateError` (páginas en blanco
+ * y una segunda exportación fallida). La exportación usa `ownedPageBitmap`.
+ */
 export function pageBitmap(projectId: string, page: Page, kind: 'original' | 'base'): Promise<ImageBitmap | null> {
   const k = kind === 'base' && page.has_clean ? 'clean' : 'original';
   const key = `${projectId}/${page.id}/${k}/${k === 'clean' ? page.updated : 0}`;
   if (!bitmapCache.has(key)) {
-    if (bitmapCache.size > 8) {
-      const oldest = bitmapCache.keys().next().value!;
-      void bitmapCache.get(oldest)?.then((b) => b?.close());
-      bitmapCache.delete(oldest);
-    }
-    bitmapCache.set(key, engine().image(projectId, page.id, k).then((b) => (b ? createImageBitmap(b) : null)).catch(() => null));
+    if (bitmapCache.size > 8) bitmapCache.delete(bitmapCache.keys().next().value!);
+    bitmapCache.set(key, ownedPageBitmap(projectId, page, kind).catch(() => null));
   }
   return bitmapCache.get(key)!;
 }
 
+/** Bitmap nuevo, sin caché: quien lo pide es su dueño y debe cerrarlo (lo hace `exportPages`). */
+export async function ownedPageBitmap(projectId: string, page: Page, kind: 'original' | 'base'): Promise<ImageBitmap | null> {
+  const k = kind === 'base' && page.has_clean ? 'clean' : 'original';
+  const blob = await engine().image(projectId, page.id, k);
+  return blob ? createImageBitmap(blob) : null;
+}
+
 export function clearBitmapCache(): void {
-  for (const p of bitmapCache.values()) void p.then((b) => b?.close());
-  bitmapCache.clear();
+  bitmapCache.clear(); // sin `close()`: alguna puede seguir en pantalla
 }
 
 /** Página dibujada en un canvas: original o traducida (misma composición que la exportación). */

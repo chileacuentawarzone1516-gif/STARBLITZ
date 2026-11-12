@@ -548,12 +548,16 @@ export function clamp(v: unknown): number {
   return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0.5;
 }
 
-function indexByNumber(items: unknown): Map<number, Item> {
+export function indexByNumber(items: unknown): Map<number, Item> {
   const out = new Map<number, Item>();
   for (const it of Array.isArray(items) ? items : []) {
     if (!isObj(it)) continue;
-    const n = 'n' in it ? Math.trunc(Number(it.n)) : -1;
-    out.set(Number.isFinite(n) ? n : -1, it);
+    // Paridad con `_item_n` (Python): enteros, reales sin decimales o cifras entre comillas. Antes `Math.trunc(Number(n))`:
+    // `null` contaba como 0 y `2.7` llevaba la traducción al globo 2.
+    const v = it.n;
+    const n = typeof v === 'number' && Number.isInteger(v) ? v
+      : typeof v === 'string' && /^\s*\d+\s*$/.test(v) ? Number(v) : -1;
+    out.set(n, it);
   }
   return out;
 }

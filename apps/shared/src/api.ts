@@ -37,6 +37,13 @@ export interface EngineEvents {
   connection?: (connected: boolean) => void;
 }
 
+/**
+ * Tiempos límite de las peticiones que hacen trabajo pesado DENTRO de la propia petición (el resto usa 30 s). Antes todas
+ * usaban 30 s: «Probar la traducción» carga el modelo (el motor admite hasta 20 min) y fallaba en CPU o discos lentos
+ * mientras el motor seguía trabajando; subir un capítulo grande o la primera relectura (carga del OCR) también.
+ */
+export const SLOW_MS = { llmTest: 25 * 60_000, upload: 10 * 60_000, ocr: 3 * 60_000 } as const;
+
 export class EngineClient {
   constructor(public conn: EngineConnection, private timeoutMs = 30_000) {}
 
@@ -50,9 +57,9 @@ export class EngineClient {
     return `${this.baseUrl}/api/projects/${projectId}/pages/${pageId}/image/${kind}?t=${encodeURIComponent(this.conn.token)}${v}`;
   }
 
-  private async request<T>(method: string, path: string, body?: unknown, init: RequestInit = {}): Promise<T> {
+  private async request<T>(method: string, path: string, body?: unknown, init: RequestInit = {}, timeoutMs = this.timeoutMs): Promise<T> {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     const headers: Record<string, string> = { Authorization: `Bearer ${this.conn.token}` };
     let payload: BodyInit | undefined;
     if (body instanceof FormData) payload = body;
@@ -127,7 +134,7 @@ export class EngineClient {
   compareLLMs(ids: string[]) { return this.request<Job>('POST', '/api/llm/compare', { ids }); }
   testLLM(text: string, source_lang: string) {
     return this.request<{ model: string; translation: string; confidence: number | null; flags: string[]; note: string }>(
-      'POST', '/api/llm/test', { text, source_lang });
+      'POST', '/api/llm/test', { text, source_lang }, {}, SLOW_MS.llmTest);
   }
 
   // -- proyectos ---------------------------------------------------------
@@ -144,7 +151,7 @@ export class EngineClient {
       if (f instanceof File) form.append('files', f, f.name);
       else form.append('files', f.blob, f.name);
     }
-    return this.request<Job>('POST', `/api/projects/${id}/import`, form);
+    return this.request<Job>('POST', `/api/projects/${id}/import`, form, {}, SLOW_MS.upload);
   }
   reorderPages(id: string, pageIds: string[]) {
     return this.request<{ page_ids: string[] }>('PUT', `/api/projects/${id}/pages/order`, { page_ids: pageIds });
@@ -161,10 +168,10 @@ export class EngineClient {
     return this.request<Region>('PUT', `/api/projects/${pid}/pages/${gid}/regions/${region.id}`, region);
   }
   addRegion(pid: string, gid: string, bbox: BBox) {
-    return this.request<Region>('POST', `/api/projects/${pid}/pages/${gid}/regions`, { bbox });
+    return this.request<Region>('POST', `/api/projects/${pid}/pages/${gid}/regions`, { bbox }, {}, SLOW_MS.ocr);
   }
   reocrRegion(pid: string, gid: string, rid: string, bbox: BBox) {
-    return this.request<Region>('POST', `/api/projects/${pid}/pages/${gid}/regions/${rid}/ocr`, { bbox });
+    return this.request<Region>('POST', `/api/projects/${pid}/pages/${gid}/regions/${rid}/ocr`, { bbox }, {}, SLOW_MS.ocr);
   }
   deleteRegion(pid: string, gid: string, rid: string) {
     return this.request<{ ok: boolean }>('DELETE', `/api/projects/${pid}/pages/${gid}/regions/${rid}`);

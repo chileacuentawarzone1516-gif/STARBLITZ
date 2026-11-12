@@ -11,4 +11,11 @@ contextBridge.exposeInMainWorld('starblitz', {
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
   openDataDir: (sub?: 'logs') => ipcRenderer.invoke('shell:openDataDir', sub),
   saveFiles: (files: { name: string; data: ArrayBuffer }[], kind: string) => ipcRenderer.invoke('files:save', files, kind),
+  /** Al cerrar la ventana, el proceso principal espera a que la interfaz guarde lo pendiente (máx. 5 s). */
+  onFlushBeforeClose: (flush: () => Promise<void>) => {
+    ipcRenderer.removeAllListeners('app:flush-before-close');
+    ipcRenderer.on('app:flush-before-close', () => {
+      flush().catch(() => undefined).finally(() => ipcRenderer.send('app:flushed'));
+    });
+  },
 });

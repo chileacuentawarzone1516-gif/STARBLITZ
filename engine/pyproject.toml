@@ -2,7 +2,7 @@
 name = "starblitz-engine"
 version = "1.0.0"
 description = "Motor local de traducción contextual y reconstrucción de mangas y cómics"
-requires-python = ">=3.11"
+requires-python = ">=3.12"  # numpy 2.5 (requirements.txt) exige 3.12
 license = { text = "MIT" }
 dependencies = [
   "fastapi>=0.115",

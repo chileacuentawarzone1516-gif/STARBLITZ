@@ -118,7 +118,34 @@ export class LlmLibrary implements ModelLibrary {
     return m.mmproj ? this.files.absolutePath(`${ROOT}/${m.id}/${m.mmproj}`) : null;
   }
 
-  async diskUsage(): Promise<number> { return (await this.stored()).reduce((n, m) => n + m.size, 0); }
+  /**
+   * Descargas sin terminar (carpeta sin manifiesto válido que no se está descargando): ocupan disco y antes no aparecían en
+   * ningún sitio. Se reanudan instalando el mismo archivo o se borran con `remove` (paridad con `incomplete` de Python).
+   */
+  async incomplete(): Promise<{ id: string; bytes: number }[]> {
+    const ok = new Set((await this.stored()).map((m) => m.id));
+    const out: { id: string; bytes: number }[] = [];
+    for (const entry of await this.files.list(ROOT)) {
+      if (!entry.isDir || !ID_RE.test(entry.name) || ok.has(entry.name) || this.busy.has(entry.name)) continue;
+      let bytes = 0;
+      for (const f of await this.files.list(`${ROOT}/${entry.name}`)) if (!f.isDir) bytes += f.size;
+      if (bytes) out.push({ id: entry.name, bytes });
+    }
+    return out.sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  async diskUsage(): Promise<number> {
+    return (await this.stored()).reduce((n, m) => n + m.size, 0) + (await this.incomplete()).reduce((n, i) => n + i.bytes, 0);
+  }
+
+  /** Bytes ya presentes de un archivo del modelo: completo o a medias (`.part`). */
+  private async partialBytes(path: string, size: number): Promise<number> {
+    for (const p of [path, `${path}.part`]) {
+      const st = await this.files.stat(p);
+      if (st.exists) return Math.min(size, st.size);
+    }
+    return 0;
+  }
 
   // -- Hugging Face ------------------------------------------------------------------------------
   async search(query: string, token: string, limit = 20): Promise<HFSearchResult[]> {
@@ -170,7 +197,11 @@ export class LlmLibrary implements ModelLibrary {
       const todo = [...shards, ...(mmproj ? [remote.files[mmproj]].filter(Boolean) : [])];
       if (mmproj && todo.length !== shards.length + 1) throw new AppError('not_found', `No existe el archivo «${mmproj}» en ${repo}.`, 404);
       const total = todo.reduce((n, f) => n + f.size, 0) || 1;
-      const needDisk = total * 1.01 + 64 * 1024 * 1024;
+      // Lo ya descargado (completo o `.part` de una descarga pausada o cancelada) no vuelve a ocupar espacio: antes se exigía
+      // el tamaño entero y reanudar una descarga casi completa daba «No hay espacio».
+      let already = 0;
+      for (const f of todo) already += await this.partialBytes(`${ROOT}/${id}/${f.path.split('/').pop()!}`, f.size);
+      const needDisk = Math.max(0, total - already) * 1.01 + 64 * 1024 * 1024;
       const free = await this.files.freeBytes();
       if (free < needDisk) {
         throw new AppError('disk_full', `No hay espacio suficiente: se necesitan ${(needDisk / GIB).toFixed(1)} GB libres y hay ${(free / GIB).toFixed(1)} GB.`, 507);

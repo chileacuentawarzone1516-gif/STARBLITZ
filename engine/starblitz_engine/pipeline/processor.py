@@ -267,13 +267,13 @@ class Processor:
             if getattr(translator, "uses_image", True) and self.use_vision():
                 image = annotate_for_llm(read_bgr(self.store.original_path(project_id, page)), [r.bbox for r in page.regions])
             earlier = [story[p] for p in all_ids[:idx] if p in story]
+            seen = _snapshot(page.regions)
             result = translator.translate_page(project, page, prev_page=prev_page, next_page=next_page, story=earlier,
                                                image_jpeg=image, cancel=ctx.cancel_event)
             with self.store.lock(project_id):
                 project = self.store.get(project_id)
                 page = self.store.get_page(project_id, pid)
-                by_id = {r.id: r for r in result.updated}
-                page.regions = [by_id.get(r.id, r) for r in page.regions]
+                page.regions = _merge_unchanged(page.regions, result.updated, seen)
                 page.summary = result.summary or page.summary
                 if page.status in ("imported", "analyzed"):
                     page.status = "translated"
@@ -358,7 +358,6 @@ class Processor:
         order = reading_order([b.bbox for b in blocks], panels, project.reading_direction)
         engine = self._ocr.engine_for(project.lang)
         median_line = float(np.median([b.line_size for b in blocks])) if blocks else 0.0
-        keep = {r.id: r for r in page.regions if r.status in ("approved", "edited")}
         regions: list[Region] = []
         centers = [((b.bbox[0] + b.bbox[2]) / 2, (b.bbox[1] + b.bbox[3]) / 2) for b in blocks]
         for rank, bi in enumerate(order):
@@ -374,18 +373,17 @@ class Processor:
                 region.note = "El OCR no pudo leer este texto: escríbelo a mano o vuelve a leer el área."
             regions.append(region)
         separate_layouts(regions, page.height)
-        # Se conservan los textos que el usuario ya revisó si siguen en el mismo sitio.
-        for r in regions:
-            for old in keep.values():
-                if _iou(r.bbox, old.bbox) > 0.6:
-                    r.translation, r.status, r.style, r.speaker = old.translation, old.status, old.style, old.speaker
-        page.regions = regions
-        page.panels = [tuple(int(v) for v in p) for p in panels]
-        page.status, page.error, page.ocr_engine = "analyzed", "", engine.id
-        page.has_clean = False
         write_png(self.store.mask_path(project.id, page.id), mask, compression=6)
-        self.store.save_page(project.id, page)
-        return page
+        with self.store.lock(project.id):
+            # Con la página recién leída: lo revisado mientras se analizaba también se conserva (paridad con el móvil).
+            fresh = self.store.get_page(project.id, page.id)
+            keep = [r for r in fresh.regions if r.status in ("approved", "edited")]
+            fresh.regions = _keep_reviewed(regions, keep)
+            fresh.panels = [tuple(int(v) for v in p) for p in panels]
+            fresh.status, fresh.error, fresh.ocr_engine = "analyzed", "", engine.id
+            fresh.has_clean = False
+            self.store.save_page(project.id, fresh)
+        return fresh
 
     def _make_region(self, project: Project, page: Page, img: np.ndarray, mask: np.ndarray, block: DetectedBlock,
                      text: str, conf: float, engine: str, order: int, median_line: float, region_id: str | None = None,
@@ -473,7 +471,9 @@ class Processor:
         idx = project.page_ids.index(page_id)
         prev_page = self.store.get_page(project_id, project.page_ids[idx - 1]) if idx > 0 else None
         next_page = self.store.get_page(project_id, project.page_ids[idx + 1]) if idx + 1 < len(project.page_ids) else None
-        story = [p.summary for p in self.store.pages(project) if p.summary][:idx]
+        # Solo las páginas ANTERIORES (antes se filtraba y luego se cortaba: con un resumen vacío entraban páginas posteriores).
+        story = [p.summary for p in self.store.pages(project)[:idx] if p.summary]
+        seen = _snapshot(page.regions)
         subset = page.model_copy(deep=True)
         for r in subset.regions:
             if r.id in region_ids:
@@ -486,9 +486,10 @@ class Processor:
         wanted = {r.id: r for r in result.updated if r.id in region_ids}
         with self.store.lock(project_id):
             page = self.store.get_page(project_id, page_id)
-            page.regions = [wanted.get(r.id, r) for r in page.regions]
+            page.regions = _merge_unchanged(page.regions, list(wanted.values()), seen)
             self.store.save_page(project_id, page)
-        return list(wanted.values())
+            applied = {r.id for r in page.regions if r.id in wanted and r is wanted[r.id]}
+        return [r for r in wanted.values() if r.id in applied]
 
     # -- etapa 3: limpieza ----------------------------------------------------
     def clean_page(self, project: Project, page: Page) -> Page:
@@ -637,6 +638,39 @@ def _split_lines(img: np.ndarray, mask: np.ndarray, bbox, vertical: bool) -> lis
             ly1, ly2, lx1, lx2 = y1 + max(0, a - pad), y1 + min(y2 - y1, b + pad), x1 + rows[0], x1 + rows[-1] + 1
         lines.append(np.array([[lx1, ly1], [lx2, ly1], [lx2, ly2], [lx1, ly2]], np.int32))
     return lines
+
+
+def _keep_reviewed(regions: list[Region], keep: list[Region]) -> list[Region]:
+    """Conserva al volver a analizar los textos que el usuario ya revisó (``edited``/``approved``).
+
+    Si siguen en el mismo sitio, sobre la región nueva (con su texto original, su caja y sus opciones de borrado y
+    rotulado). Si el detector ya no los encuentra (p. ej. un globo que la persona marcó a mano donde el detector falló),
+    se conservan tal cual: antes se perdían sin aviso.
+    """
+    matched: set[str] = set()
+    for r in regions:
+        for old in keep:
+            if old.id not in matched and _iou(r.bbox, old.bbox) > 0.6:
+                matched.add(old.id)
+                r.translation, r.status, r.style, r.speaker = old.translation, old.status, old.style, old.speaker
+                r.source_text, r.erase, r.render, r.layout_box = old.source_text, old.erase, old.render, old.layout_box
+                break
+    out = regions + [old for old in keep if old.id not in matched]
+    for i, r in enumerate(out):
+        r.order = i
+    return out
+
+
+def _snapshot(regions: list[Region]) -> dict[str, dict]:
+    """Estado de cada región al empezar una traducción (para no pisar lo que el usuario cambie mientras tanto)."""
+    return {r.id: r.model_dump() for r in regions}
+
+
+def _merge_unchanged(current: list[Region], updated: list[Region], seen: dict[str, dict]) -> list[Region]:
+    """Aplica las regiones traducidas solo donde la región guardada sigue igual que al empezar: una edición del usuario
+    hecha durante la traducción (texto, estado aprobado, estilo…) gana a la del modelo en vez de perderse."""
+    by_id = {r.id: r for r in updated}
+    return [by_id[r.id] if r.id in by_id and seen.get(r.id) == r.model_dump() else r for r in current]
 
 
 def _iou(a, b) -> float:

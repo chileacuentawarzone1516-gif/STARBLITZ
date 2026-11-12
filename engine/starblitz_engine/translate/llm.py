@@ -125,6 +125,39 @@ class LLMClient:
     def _timeout(self) -> httpx.Timeout:
         return httpx.Timeout(connect=5.0, read=float(self.s.timeout_s), write=60.0, pool=5.0)
 
+    def _post(self, url: str, payload: dict, *, headers: dict | None = None,
+              cancel: threading.Event | None = None) -> httpx.Response:
+        """POST que atiende «Cancelar» y «Pausar» mientras espera la respuesta.
+
+        Antes ``httpx.post`` bloqueaba hasta ``timeout_s`` (600 s por defecto) sin mirar ``cancel``. Ahora la petición va
+        en un hilo; si se cancela, se cierra la conexión (Ollama y llama.cpp dejan de generar al cerrarse) y se lanza
+        ``CancelledError`` al momento.
+        """
+        if cancel is None:
+            return httpx.post(url, json=payload, headers=headers, timeout=self._timeout())
+        if cancel.is_set():
+            raise CancelledError()
+        client = httpx.Client(timeout=self._timeout())
+        box: dict[str, Any] = {}
+
+        def run() -> None:
+            try:
+                box["response"] = client.post(url, json=payload, headers=headers)
+            except BaseException as exc:  # noqa: BLE001 — se vuelve a lanzar en el hilo que llama
+                box["error"] = exc
+
+        worker = threading.Thread(target=run, name="llm-post", daemon=True)
+        worker.start()
+        while worker.is_alive():
+            worker.join(0.2)
+            if worker.is_alive() and cancel.is_set():
+                client.close()
+                raise CancelledError()
+        client.close()
+        if "error" in box:
+            raise box["error"]
+        return box["response"]
+
 
 class OllamaClient(LLMClient):
     def _url(self, path: str) -> str:
@@ -186,7 +219,7 @@ class OllamaClient(LLMClient):
         if info.thinking:
             payload["think"] = False  # la traducción no se beneficia del razonamiento largo y es mucho más lenta
         try:
-            r = httpx.post(self._url("/api/chat"), json=payload, timeout=self._timeout())
+            r = self._post(self._url("/api/chat"), payload, cancel=cancel)
         except httpx.TimeoutException as exc:
             raise LLMUnavailableError("El modelo tardó demasiado en responder. Prueba un modelo más ligero o aumenta el tiempo de espera.") from exc
         except httpx.HTTPError as exc:
@@ -213,7 +246,7 @@ class OllamaClient(LLMClient):
         if self.model_info(model).thinking:
             payload["think"] = False
         try:
-            r = httpx.post(self._url("/api/chat"), json=payload, timeout=self._timeout())
+            r = self._post(self._url("/api/chat"), payload, cancel=cancel)
         except httpx.TimeoutException as exc:
             raise LLMUnavailableError("El modelo tardó demasiado en responder. Prueba un modelo más ligero o aumenta el tiempo de espera.") from exc
         except httpx.HTTPError as exc:
@@ -282,7 +315,7 @@ class OpenAICompatibleClient(LLMClient):
         payload = {"model": model, "temperature": temperature, "max_tokens": max_tokens,
                    "messages": [{"role": m.role, "content": m.content} for m in messages], **(extra or {})}
         try:
-            r = httpx.post(self._url("/chat/completions"), json=payload, headers=self._headers(), timeout=self._timeout())
+            r = self._post(self._url("/chat/completions"), payload, headers=self._headers(), cancel=cancel)
         except httpx.HTTPError as exc:
             raise LLMUnavailableError("No se pudo conectar con el servidor compatible con OpenAI configurado.") from exc
         if r.status_code >= 400:
@@ -294,7 +327,7 @@ class OpenAICompatibleClient(LLMClient):
               cancel: threading.Event | None = None, max_tokens: int | None = None) -> str:
         payload = self._payload(messages, schema, model=model, temperature=temperature, max_tokens=max_tokens)
         try:
-            r = httpx.post(self._url("/chat/completions"), json=payload, headers=self._headers(), timeout=self._timeout())
+            r = self._post(self._url("/chat/completions"), payload, headers=self._headers(), cancel=cancel)
         except httpx.HTTPError as exc:
             raise LLMUnavailableError("No se pudo conectar con el servidor compatible con OpenAI configurado.") from exc
         if r.status_code >= 400:

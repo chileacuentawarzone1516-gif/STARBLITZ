@@ -23,13 +23,22 @@ LLAMA_TAG="b12017"
 LLAMA_URL="https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-win-vulkan-x64.zip"
 LLAMA_SHA256="e3d43788fed7b2e5983320975cb21d91fbc2579698a497f0f8cecbe9c029312b"
 PIP="${PIP:-python3 -m pip}"
+# SHA-256 oficiales: Electron (SHASUMS256.txt de su Release) y python-build-standalone (SHA256SUMS de su Release).
+# Al subir de versión hay que actualizar el hash: si falta, la compilación se detiene en vez de empaquetar algo sin comprobar.
+PY_SHA256="0d422a1439ec308e03f47df551bc30f5994727c456e414b026d202bcda9b7c1c"
+case "$ELECTRON_VERSION" in
+  38.2.0) ELECTRON_SHA256="4382b317dbbbc0bbf8a301304749324b88207218aac240b670f1c1247c2a02b0" ;;
+  *) echo "Falta el SHA-256 de Electron ${ELECTRON_VERSION} (win32-x64) en scripts/build-windows.sh"; exit 1 ;;
+esac
 
 step() { printf '\n\033[1;35m▶ %s\033[0m\n' "$*"; }
-fetch() { # fetch URL DESTINO (con caché y reanudación)
+fetch() { # fetch URL DESTINO SHA256 (con caché y reanudación; la copia en caché también se comprueba)
   if [ ! -s "$2" ]; then
     curl -fL --retry 4 --retry-delay 3 -C - -o "$2.part" "$1"
     mv "$2.part" "$2"
   fi
+  echo "$3  $2" | sha256sum -c - >/dev/null \
+    || { echo "El SHA-256 de $(basename "$2") no coincide: se borra la copia en caché."; rm -f "$2"; exit 1; }
 }
 
 mkdir -p "$CACHE"
@@ -42,7 +51,7 @@ fi
 [ -f "$ROOT/apps/desktop/dist-electron/main.cjs" ] || { echo "Falta dist-electron (node electron/build.mjs)"; exit 1; }
 
 step "Electron ${ELECTRON_VERSION} (win32-x64)"
-fetch "$ELECTRON_URL" "$CACHE/electron-${ELECTRON_VERSION}-win32-x64.zip"
+fetch "$ELECTRON_URL" "$CACHE/electron-${ELECTRON_VERSION}-win32-x64.zip" "$ELECTRON_SHA256"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 unzip -q "$CACHE/electron-${ELECTRON_VERSION}-win32-x64.zip" -d "$OUT"
@@ -59,7 +68,7 @@ require('fs').writeFileSync('$APP/package.json', JSON.stringify({name:'starblitz
 cp -r "$ROOT/apps/desktop/dist" "$OUT/resources/ui"
 
 step "Python ${PY_VERSION} embebido"
-fetch "$PY_URL" "$CACHE/cpython-${PY_VERSION}-win64.tar.gz"
+fetch "$PY_URL" "$CACHE/cpython-${PY_VERSION}-win64.tar.gz" "$PY_SHA256"
 mkdir -p "$OUT/resources/engine"
 tar -xzf "$CACHE/cpython-${PY_VERSION}-win64.tar.gz" -C "$OUT/resources/engine"
 SITE="$OUT/resources/engine/python/Lib/site-packages"
@@ -81,9 +90,7 @@ mkdir -p "$OUT/resources/engine/app"
 
 step "llama.cpp ${LLAMA_TAG} (servidor de modelos de lenguaje con Vulkan)"
 # Servidor oficial de llama.cpp, fijado por versión y comprobado por SHA-256: es lo que ejecuta la traducción en local.
-fetch "$LLAMA_URL" "$CACHE/llama-${LLAMA_TAG}-win-vulkan-x64.zip"
-echo "${LLAMA_SHA256}  $CACHE/llama-${LLAMA_TAG}-win-vulkan-x64.zip" | sha256sum -c - >/dev/null \
-  || { echo "El SHA-256 de llama.cpp no coincide: se borra la copia en caché."; rm -f "$CACHE/llama-${LLAMA_TAG}-win-vulkan-x64.zip"; exit 1; }
+fetch "$LLAMA_URL" "$CACHE/llama-${LLAMA_TAG}-win-vulkan-x64.zip" "$LLAMA_SHA256"
 LLAMA_OUT="$OUT/resources/llama"
 mkdir -p "$LLAMA_OUT"
 unzip -q -o "$CACHE/llama-${LLAMA_TAG}-win-vulkan-x64.zip" -d "$LLAMA_OUT"

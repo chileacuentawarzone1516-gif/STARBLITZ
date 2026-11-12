@@ -22,12 +22,29 @@ export function Installed({ llm, reload, goTo }: { llm: LLMOverview; reload: () 
     if (!(await confirmAction({ title: `¿Eliminar ${label}?`, message: `Se liberarán ${formatBytes(size)}. Podrás volver a descargarlo cuando quieras.`, confirm: 'Eliminar', danger: true }))) return;
     await act(id, () => engine().removeLLM(id));
   };
+
+  // Descargas sin terminar: ocupan disco y antes no aparecían en ningún sitio (se reanudan instalando el mismo archivo).
+  const partial = llm.incomplete ?? [];
+  const partialBlock = partial.length > 0 && (
+    <div className="m-callout" role="note">
+      <strong>Descargas sin terminar</strong>
+      <p className="small muted">Ocupan espacio. Se reanudan al volver a instalar el mismo archivo; si no las necesitas, bórralas.</p>
+      {partial.map((p) => (
+        <p className="small" key={p.id}>{p.id} · {formatBytes(p.bytes)}{' '}
+          <button className="btn btn-ghost btn-sm" disabled={busy === p.id} onClick={() => remove(p.id, 'la descarga sin terminar', p.bytes)}><Trash2 />Borrar</button>
+        </p>
+      ))}
+    </div>
+  );
   if (!models.length) {
     return (
-      <EmptyState icon={<Zap />} title="Aún no hay un modelo de traducción"
-        action={<button className="btn btn-primary" onClick={() => goTo('recommended')}>Ver los recomendados</button>}>
-        STARBLITZ traduce con un modelo que se ejecuta en este teléfono. Se descarga una vez y funciona sin Internet.
-      </EmptyState>
+      <div className="m-stack">
+        <EmptyState icon={<Zap />} title="Aún no hay un modelo de traducción"
+          action={<button className="btn btn-primary" onClick={() => goTo('recommended')}>Ver los recomendados</button>}>
+          STARBLITZ traduce con un modelo que se ejecuta en este teléfono. Se descarga una vez y funciona sin Internet.
+        </EmptyState>
+        {partialBlock}
+      </div>
     );
   }
   return (
@@ -54,6 +71,7 @@ export function Installed({ llm, reload, goTo }: { llm: LLMOverview; reload: () 
           </article>
         ))}
       </div>
+      {partialBlock}
       {llm.runtime.running && (
         <div className="m-callout">
           <PowerOff aria-hidden />

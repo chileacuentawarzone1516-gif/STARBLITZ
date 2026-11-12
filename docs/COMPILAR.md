@@ -3,7 +3,7 @@
 ## Requisitos de desarrollo
 
 - Node.js 20+ (probado con 22) y npm.
-- Python 3.11+ (probado con 3.12 y 3.13) para el motor y las pruebas.
+- Python 3.12+ (probado con 3.12 y 3.14; numpy 2.5 exige 3.12) para el motor y las pruebas.
 - APK: JDK 21 y Android SDK 35 (el script de Windows los descarga solos). JDK cualquiera para las pruebas nativas.
 
 ```bash
@@ -16,14 +16,15 @@ python -m venv .venv && .venv/bin/pip install -r engine/requirements.txt onnxrun
 
 ```bash
 npm run typecheck                        # shared + desktop + mobile
-npm test                                 # shared (23) + mobile (149)
-cd engine && ../.venv/bin/python -m pytest -q     # 76 (14 requieren modelos reales)
+npm test                                 # shared (30) + mobile (274) + desktop (6)
+cd engine && ../.venv/bin/python -m pytest -q     # 131 (19 requieren modelos o páginas reales)
 bash apps/mobile/e2e/run.sh              # E2E en Chromium (necesita playwright, Pillow, openssl y fuente CJK)
 ```
 
 Los datos compartidos Python ↔ TypeScript (prompts, perfiles, casos de paridad, catálogo) se regeneran con
-`tools/export_translate_fixtures.py`, `tools/export_llm_catalog.py` y `tools/export_vision_registry.py`; las pruebas
-fallan si TypeScript y Python se desvían.
+`tools/export_translate_fixtures.py`, `tools/export_llm_catalog.py`, `tools/export_vision_registry.py` y
+`tools/export_glyph_metrics.py`; las pruebas
+fallan si TypeScript y Python se desvían, y `ci.yml` regenera los cuatro y falla si algún JSON del repo está desfasado.
 
 ## Ejecutar en desarrollo
 
